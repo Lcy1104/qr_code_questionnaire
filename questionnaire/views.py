@@ -1300,7 +1300,7 @@ def response_detail(request, response_id):
         id=response_id
     )
     # 权限：问卷创建者或管理员可看
-    if not (request.user == response.questionnaire.creator or request.user.is_admin):
+    if not (request.user == response.user or request.user == response.questionnaire.creator or request.user.is_admin):
         messages.error(request, '没有权限查看此回答')
         return redirect('dashboard')
 

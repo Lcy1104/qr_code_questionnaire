@@ -64,10 +64,17 @@
                                     </span>
                                 </td>
                                 <td>
-                                    <a href="{% url 'questionnaire_detail' response.questionnaire.id %}"
-                                       class="btn btn-sm btn-outline-primary">
-                                        查看问卷
-                                    </a>
+                                    {% if response.questionnaire.creator == request.user %}
+                                        <a href="{% url 'questionnaire_detail' response.questionnaire.id %}"
+                                           class="btn btn-sm btn-outline-primary">
+                                            查看问卷
+                                        </a>
+                                    {% else %}
+                                        <a href="{% url 'response_detail' response.id %}"
+                                           class="btn btn-sm btn-outline-primary">
+                                            查看我的回答
+                                        </a>
+                                    {% endif %}
                                 </td>
                             </tr>
                             {% endfor %}
