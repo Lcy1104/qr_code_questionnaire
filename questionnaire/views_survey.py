@@ -35,6 +35,8 @@ def survey_landing(request, survey_uuid):
         'user_is_authenticated': request.user.is_authenticated,
     }
 
+    context['anonymous_url'] = reverse('survey_form', args=[survey_uuid]) + '?anonymous=1'
+
     if request.user.is_authenticated:
         # 已登录用户：显示“开始填写”按钮
         context['start_url'] = reverse('survey_form', args=[survey_uuid])
@@ -42,8 +44,6 @@ def survey_landing(request, survey_uuid):
         # 未登录用户：显示登录、注册、匿名填写按钮
         context['login_url'] = reverse('login') + f'?next={reverse("survey_form", args=[survey_uuid])}'
         context['register_url'] = reverse('register') + f'?next={reverse("survey_form", args=[survey_uuid])}'
-        # 匿名链接添加 ?anonymous=1，用于后续视图检查
-        context['anonymous_url'] = reverse('survey_form', args=[survey_uuid]) + '?anonymous=1'
 
     return render(request, 'questionnaire/landing.html', context)
 
