@@ -1,0 +1,43 @@
+<!-- questionnaire/templates/questionnaire/invite_code.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>输入邀请码 - {{ questionnaire.title }}</title>
+    <style>
+        body { font-family: Arial; text-align: center; padding: 50px; }
+        .container { max-width: 400px; margin: 0 auto; }
+        input { width: 100%; padding: 10px; margin: 10px 0; }
+        button { background: #007bff; color: white; padding: 10px 20px; border: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>{{ questionnaire.title }}</h2>
+        <p>此问卷需要邀请码才能填写</p>
+        
+        {% if error %}
+            <div class="alert alert-danger alert-dismissible fade show d-flex align-items-center" role="alert">
+                <i class="fas fa-exclamation-circle me-2"></i>
+                <span>{{ error }}</span>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endif %}
+        
+        <form method="post">
+            {% csrf_token %}
+            <input type="text" 
+                   name="invite_code" 
+                   placeholder="请输入邀请码" 
+                   required 
+                   autofocus>
+            <br>
+            <button type="submit">验证邀请码</button>
+        </form>
+        
+        <p style="margin-top: 20px; color: #666;">
+            邀请码通常由问卷创建者提供<br>
+            如果您没有邀请码，请联系问卷创建者
+        </p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>登录 - 问卷调查系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .captcha-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .captcha-img {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            height: 40px;
+        }
+        .captcha-input {
+            flex-grow: 1;
+        }
+        .refresh-btn {
+            padding: 6px 12px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+<div class="container">
+    <div class="row justify-content-center mt-5">
+        <div class="col-md-4">
+            <div class="card shadow">
+                <div class="card-header text-center bg-primary text-white">
+                    <h5>登录 - 问卷调查系统</h5>
+                </div>
+                <div class="card-body">
+                    <!-- 修改1：删除原有的messages部分，替换为 -->
+                    {% if error %}
+                    <div class="alert alert-danger alert-dismissible fade show mb-3" role="alert">
+                        {{ error }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- 修改2：表单action留空，表示提交到当前URL -->
+                    <form method="post" id="loginForm" action="">
+                        {% csrf_token %}
+                        
+                        <!-- 用户名 -->
+                        <div class="mb-3">
+                            <label class="form-label">用户名</label>
+                            <input type="text" name="username" 
+                                   class="form-control" 
+                                   value="{{ username|default_if_none:'' }}"
+                                   placeholder="请输入用户名" 
+                                   required
+                                   autocomplete="username">
+                        </div>
+                        
+                        <!-- 密码 -->
+                        <div class="mb-3">
+                            <label class="form-label">密码</label>
+                            <input type="password" name="password" 
+                                   class="form-control" 
+                                   placeholder="请输入密码" 
+                                   required
+                                   autocomplete="current-password">
+                        </div>
+                        
+                        <!-- 自定义验证码 -->
+                        <div class="mb-3">
+                            <label class="form-label">验证码</label>
+                            <div class="captcha-container">
+                                <!-- 验证码图片 -->
+                                <img src="{% url 'captcha_image' %}" 
+                                     id="captcha-img"
+                                     class="captcha-img"
+                                     alt="验证码"
+                                     title="点击刷新验证码">
+                                
+                                <!-- 验证码输入框 -->
+                                <div class="captcha-input">
+                                    <input type="text" name="captcha" 
+                                           id="id_captcha"
+                                           class="form-control {% if form.captcha.errors %}is-invalid{% endif %}" 
+                                           placeholder="输入验证码" 
+                                           maxlength="4"
+                                           required
+                                           autocomplete="off"
+                                           value="{{ form.captcha.value|default_if_none:'' }}">
+                                </div>
+                                
+                                <!-- 刷新按钮 -->
+                                <button type="button" class="btn btn-outline-secondary refresh-btn" 
+                                        id="refresh-captcha" title="刷新验证码">
+                                    ↻
+                                </button>
+                            </div>
+                            <small class="text-muted">请输入图片中的4位数字</small>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100">登录</button>
+                    </form>
+                    
+                    <div class="text-center mt-3">
+                        <p class="mb-2">还没有账号？ <a href="{% url 'register' %}">立即注册</a></p>
+                        <p class="mb-0"><a href="{% url 'password_reset' %}">忘记密码？</a></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 刷新验证码
+function refreshCaptcha() {
+    const captchaImg = document.getElementById('captcha-img');
+    const captchaInput = document.getElementById('id_captcha');
+    
+    // 清空输入框
+    if (captchaInput) {
+        captchaInput.value = '';
+    }
+    
+    // 方案1：使用AJAX刷新
+    fetch('{% url "captcha_refresh" %}')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('网络响应错误');
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success && captchaImg) {
+                // 更新图片，添加时间戳防止缓存
+                const timestamp = new Date().getTime();
+                captchaImg.src = '{% url "captcha_image" %}?t=' + timestamp;
+            }
+        })
+        .catch(error => {
+            console.log('AJAX刷新失败，使用直接刷新方式:', error);
+            // 方案2：直接刷新
+            if (captchaImg) {
+                const timestamp = new Date().getTime();
+                captchaImg.src = captchaImg.src.split('?')[0] + '?t=' + timestamp;
+            }
+        });
+}
+
+// 事件绑定
+document.addEventListener('DOMContentLoaded', function() {
+    // 绑定刷新按钮
+    document.getElementById('refresh-captcha').addEventListener('click', refreshCaptcha);
+    
+    // 绑定图片点击
+    document.getElementById('captcha-img').addEventListener('click', refreshCaptcha);
+    
+    // 如果有错误信息，自动刷新验证码
+    if (document.querySelector('.alert-danger')) {
+        setTimeout(refreshCaptcha, 300);
+    }
+    
+    // 验证码输入框获得焦点时，如果有错误，仅清空内容
+const captchaInput = document.getElementById('id_captcha');
+if (captchaInput) {
+    captchaInput.addEventListener('focus', function() {
+        if (document.querySelector('.alert-danger')) {
+            this.value = '';
+            // 移除 refreshCaptcha() 调用
+        }
+    });
+}
+});
+</script>
+</body>
+</html>

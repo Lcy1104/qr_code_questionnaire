@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .user-status-active { color: green; }
+        .user-status-inactive { color: red; }
+        .user-role-admin { background-color: #e7f3ff; }
+        .user-role-user { background-color: #f8f9fa; }
+
+        /* 统一按钮样式 */
+        .action-buttons {
+            display: flex;
+            gap: 4px;
+            flex-wrap: nowrap;
+        }
+
+        .action-btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* 表单按钮特殊处理 */
+        form.d-inline {
+            margin: 0;
+            padding: 0;
+            display: inline;
+        }
+
+        /* 确保链接和按钮的样式一致 */
+        a.action-btn.btn-outline-primary,
+        button.action-btn.btn-outline-warning,
+        button.action-btn.btn-outline-success {
+            border: 1px solid;
+            line-height: 1;
+        }
+
+        /* 确保所有操作按钮尺寸完全一致 */
+    .action-btn.btn-sm {
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 32px !important;
+        min-height: 32px !important;
+    }
+
+        /* 消息过滤样式 */
+        .alert .fa-check-circle { color: #198754; }
+        .alert .fa-exclamation-circle { color: #dc3545; }
+        .alert .fa-info-circle { color: #0dcaf0; }
+    </style>
+</head>
+<body>
+    {% include 'navbar.html' %}
+
+    <div class="container mt-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'admin_dashboard' %}">管理后台</a></li>
+                <li class="breadcrumb-item active">用户管理</li>
+            </ol>
+        </nav>
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>用户管理</h1>
+            <div>
+                <span class="badge bg-primary">总用户数: {{ user_stats|length }}</span>
+            </div>
+        </div>
+
+        <!-- 消息提醒（过滤无关消息） -->
+        <!-- 消息Toast容器 -->
+        <div class="position-fixed top-0 end-0 p-3" style="z-index: 1050">
+            {% for message in messages %}
+                {% comment %} 只显示用户管理相关的消息 {% endcomment %}
+                {% if "用户" in message.message or "管理员" in message.message or "激活" in message.message or "禁用" in message.message %}
+                    <div class="toast show mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="5000">
+                        <div class="toast-header
+                                {% if '已激活' in message.message or '设为管理员' in message.message %}bg-success text-white
+                                {% elif '已禁用' in message.message %}bg-danger text-white
+                                {% elif '失败' in message.message or '错误' in message.message %}bg-danger text-white
+                                {% else %}bg-info text-white{% endif %}">
+                            <i class="fas
+                                {% if '已激活' in message.message or '设为管理员' in message.message %}fa-check-circle
+                                {% elif '已禁用' in message.message %}fa-user-slash
+                                {% elif '失败' in message.message or '错误' in message.message %}fa-exclamation-circle
+                                {% else %}fa-info-circle{% endif %} me-2"></i>
+                            <strong class="me-auto">
+                                {% if '已激活' in message.message %}用户已激活
+                                {% elif '已禁用' in message.message %}用户已禁用
+                                {% elif '设为管理员' in message.message %}权限变更
+                                {% else %}系统消息{% endif %}
+                            </strong>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                        </div>
+                        <div class="toast-body">
+                            {{ message }}
+                        </div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+
+<!-- 原有的页面内容保持不变 -->
+<div class="container mt-4">
+    <!-- ... 其他内容保持不变 ... -->
+
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>用户名</th>
+                                <th>邮箱</th>
+                                <th>真实姓名</th>
+                                <th>角色</th>
+                                <th>状态</th>
+                                <th>创建时间</th>
+                                <th>问卷数</th>
+                                <th>回答数</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for stat in user_stats %}
+                            <tr class="{% if stat.user.is_admin %}user-role-admin{% else %}user-role-user{% endif %}">
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <strong>{{ stat.user.username }}</strong>
+                                        <!-- 原始管理员标记 -->
+                                        {% if stat.user.is_original_admin %}
+                                            <span class="badge bg-warning ms-2"
+                                                  data-bs-toggle="tooltip"
+                                                  data-bs-placement="top"
+                                                  title="主管理员">
+                                                ⭐
+                                            </span>
+                                        {% endif %}
+                                        <!-- 管理员标记 - 基于 is_superuser -->
+                                        {% if stat.user.is_superuser %}
+                                            <span class="badge bg-primary ms-2"
+                                                  data-bs-toggle="tooltip"
+                                                  data-bs-placement="top"
+                                                  title="管理员（超级用户）">
+                                                管理员
+                                            </span>
+                                        {% else %}
+                                            <span class="badge bg-secondary ms-2"
+                                                  data-bs-toggle="tooltip"
+                                                  data-bs-placement="top"
+                                                  title="普通用户">
+                                                普通用户
+                                            </span>
+                                        {% endif %}
+                                        <!-- 当前用户标记 -->
+                                        {% if stat.user == request.user %}
+                                            <span class="badge bg-info ms-2">当前用户</span>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                                <td>{{ stat.user.email|default:"-" }}</td>
+                                <td>{{ stat.user.real_name|default:"-" }}</td>
+                                <td>
+                                    {% if stat.user.is_superuser %}
+                                    <span class="badge bg-primary">管理员</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">普通用户</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if stat.user.is_active %}
+                                    <span class="user-status-active">
+                                        <i class="fas fa-check-circle me-1"></i>活跃
+                                    </span>
+                                    {% else %}
+                                    <span class="user-status-inactive">
+                                        <i class="fas fa-times-circle me-1"></i>禁用
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ stat.user.date_joined|date:"Y-m-d" }}</td>
+                                <td>{{ stat.questionnaires_count }}</td>
+                                <td>{{ stat.responses_count }}</td>
+                                <!-- manage_users.html 中的操作按钮部分 -->
+                                <td>
+                                    <div class="action-buttons">
+                                        <!-- 查看详情按钮 -->
+                                        <a href="{% url 'user_detail' stat.user.id %}"
+                                           class="action-btn btn btn-outline-primary btn-sm"
+                                           data-bs-toggle="tooltip"
+                                           data-bs-placement="top"
+                                           title="查看用户详情">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                        <!-- 只有原始管理员可以操作其他用户 -->
+                                        {% if request.user.is_original_admin and stat.user != request.user %}
+                                            <!-- 禁用/激活用户按钮 -->
+                                            <form method="post"
+                                                  action="{% url 'toggle_user_active' stat.user.id %}"
+                                                  class="d-inline m-0 p-0 border-0">
+                                                {% csrf_token %}
+                                                <button type="submit"
+                                                        class="action-btn btn btn-outline-warning btn-sm"
+                                                        data-bs-toggle="tooltip"
+                                                        data-bs-placement="top"
+                                                        title="{% if stat.user.is_active %}禁用用户{% else %}激活用户{% endif %}">
+                                                    {% if stat.user.is_active %}
+                                                        <i class="fas fa-user-slash"></i>
+                                                    {% else %}
+                                                        <i class="fas fa-user-check"></i>
+                                                    {% endif %}
+                                                </button>
+                                            </form>
+                                            <!-- 管理员权限切换按钮 -->
+                                            {% if stat.user.is_superuser %}
+                                                <!-- 如果是管理员且不是原始管理员，显示取消按钮 -->
+                                                {% if not stat.user.is_original_admin %}
+                                                    <form method="post"
+                                                          action="{% url 'remove_user_admin' stat.user.id %}"
+                                                          class="d-inline m-0 p-0 border-0">
+                                                        {% csrf_token %}
+                                                        <button type="submit"
+                                                                class="action-btn btn btn-outline-danger btn-sm"
+                                                                data-bs-toggle="tooltip"
+                                                                data-bs-placement="top"
+                                                                title="取消管理员权限">
+                                                            <i class="fas fa-user-times"></i>
+                                                        </button>
+                                                    </form>
+                                                {% endif %}
+                                            {% else %}
+                                                <!-- 如果不是管理员，显示设为管理员按钮 -->
+                                                <form method="post"
+                                                      action="{% url 'make_user_admin' stat.user.id %}"
+                                                      class="d-inline m-0 p-0 border-0">
+                                                    {% csrf_token %}
+                                                    <button type="submit"
+                                                            class="action-btn btn btn-outline-success btn-sm"
+                                                            data-bs-toggle="tooltip"
+                                                            data-bs-placement="top"
+                                                            title="设为管理员">
+                                                        <i class="fas fa-user-shield"></i>
+                                                    </button>
+                                                </form>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="9" class="text-center py-4">
+                                    <i class="fas fa-users fa-2x text-muted mb-3"></i>
+                                    <p class="text-muted">暂无用户数据</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-info mt-4">
+            <h6><i class="fas fa-info-circle me-2"></i>说明：</h6>
+            <ul class="mb-0">
+                <li><strong>管理员</strong>可以访问所有问卷，管理普通用户</li>
+                <li><strong>主管理员</strong>（标记为⭐）可以设置/移除其他管理员</li>
+                <li><strong>任何管理员</strong>可以禁用/激活普通用户</li>
+                <li><strong>只有原始管理员</strong>可以禁用/激活其他管理员</li>
+                <li><strong>设为管理员</strong>操作不可撤销，请谨慎操作</li>
+                <li>不能对自己执行禁用/设为管理员操作</li>
+                <li>鼠标悬停在操作图标上可查看功能说明</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 初始化Bootstrap工具提示
+        document.addEventListener('DOMContentLoaded', function() {
+            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl, {
+                    delay: { show: 100, hide: 100 }
+                });
+            });
+        });
+
+        // 确认操作
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                const action = this.getAttribute('action');
+                if (action.includes('make_user_admin')) {
+                    if (!confirm('确定要将此用户设为管理员吗？此操作不可撤销。')) {
+                        e.preventDefault();
+                    }
+                } else if (action.includes('toggle_user_active')) {
+                    const button = this.querySelector('button');
+                    const actionText = button.innerHTML.includes('user-slash') ? '禁用' : '激活';
+                    if (!confirm(`确定要${actionText}此用户吗？${actionText === '禁用' ? '用户将无法登录系统。' : '用户可以重新登录系统。'}`)) {
+                        e.preventDefault();
+                    }
+                }
+            });
+        });
+
+        // 调试：检查链接是否正确生成
+        document.addEventListener('DOMContentLoaded', function() {
+            const viewButtons = document.querySelectorAll('a.btn-outline-primary[href*="user_detail"]');
+            viewButtons.forEach(button => {
+                console.log('用户详情链接:', button.getAttribute('href'));
+            });
+
+            // 验证所有按钮尺寸是否一致
+            const allActionButtons = document.querySelectorAll('.action-btn');
+            allActionButtons.forEach(btn => {
+                console.log('按钮尺寸:', btn.offsetWidth, 'x', btn.offsetHeight);
+            });
+        });
+
+        // Toast消息自动消失
+        document.addEventListener('DOMContentLoaded', function() {
+            // 自动隐藏所有Toast消息（5秒后）
+            setTimeout(function() {
+                document.querySelectorAll('.toast.show').forEach(function(toast) {
+                    var bsToast = new bootstrap.Toast(toast);
+                    bsToast.hide();
+                });
+                }, 5000);
+            // 也可以点击关闭按钮关闭Toast
+            document.querySelectorAll('.toast .btn-close').forEach(function(closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    var toast = this.closest('.toast');
+                    var bsToast = new bootstrap.Toast(toast);
+                    bsToast.hide();
+                });
+            });
+            document.querySelectorAll('form[action*="make-admin"]').forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    if (!confirm('确定要将此用户设为管理员吗？此操作不可撤销。')) {
+                        e.preventDefault();
+                    }
+                });
+            });
+            // 确认取消管理员
+            document.querySelectorAll('form[action*="remove-admin"]').forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    if (!confirm('确定要取消此用户的管理员权限吗？')) {
+                        e.preventDefault();
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

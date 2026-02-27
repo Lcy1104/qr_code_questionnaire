@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>邀请码验证 - {{ questionnaire.title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding: 20px;
+        }
+        .verification-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .verification-header {
+            background: linear-gradient(135deg, #4a6ee0 0%, #6a45a0 100%);
+            color: white;
+            padding: 40px 30px;
+        }
+        .verification-body {
+            padding: 40px;
+        }
+        .questionnaire-preview {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 4px solid #667eea;
+        }
+        .invite-code-input {
+            font-size: 1.5rem;
+            font-weight: bold;
+            letter-spacing: 3px;
+            text-align: center;
+            text-transform: uppercase;
+        }
+        .verification-steps {
+            display: flex;
+            justify-content: space-between;
+            margin: 30px 0;
+            position: relative;
+        }
+        .verification-steps::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            background: #dee2e6;
+            z-index: 1;
+        }
+        .step {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            flex: 1;
+        }
+        .step-icon {
+            width: 40px;
+            height: 40px;
+            background: #e9ecef;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            color: #6c757d;
+            font-weight: bold;
+        }
+        .step.active .step-icon {
+            background: #667eea;
+            color: white;
+        }
+        .step-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        .step.active .step-label {
+            color: #667eea;
+            font-weight: bold;
+        }
+        .btn-lg {
+            padding: 12px 30px;
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="verification-card">
+                    <!-- 头部 -->
+                    <div class="verification-header text-center">
+                        <h1><i class="fas fa-lock me-3"></i>邀请码验证</h1>
+                        <p class="lead mb-0">请输入邀请码以访问此问卷</p>
+                    </div>
+                    
+                    <!-- 步骤指示器 -->
+                    <div class="verification-steps">
+                        <div class="step active">
+                            <div class="step-icon">1</div>
+                            <div class="step-label">验证邀请码</div>
+                        </div>
+                        <div class="step">
+                            <div class="step-icon">2</div>
+                            <div class="step-label">登录账户</div>
+                        </div>
+                        <div class="step">
+                            <div class="step-icon">3</div>
+                            <div class="step-label">填写问卷</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 内容区 -->
+                    <div class="verification-body">
+                        <!-- 消息提示 -->
+                        {% if messages %}
+                        <div class="alert alert-info alert-dismissible fade show">
+                            {% for message in messages %}
+                            <div>{{ message }}</div>
+                            {% endfor %}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                        {% endif %}
+                        
+                        <!-- 问卷预览 -->
+                        <div class="questionnaire-preview">
+                            <h4>{{ questionnaire.title }}</h4>
+                            {% if questionnaire.description %}
+                            <p class="mb-2">{{ questionnaire.description|truncatechars:200 }}</p>
+                            {% endif %}
+                            <div class="d-flex justify-content-between text-muted small">
+                                <span>
+                                    <i class="fas fa-user me-1"></i>创建者: {{ questionnaire.creator.username }}
+                                </span>
+                                <span>
+                                    <i class="fas fa-calendar me-1"></i>创建时间: {{ questionnaire.created_at|date:"Y-m-d" }}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <!-- 邀请码验证表单 -->
+                        <form method="post" action="{% url 'verify_invite_only' questionnaire.id %}">
+                            {% csrf_token %}
+                            
+                            <div class="mb-4">
+                                <label for="invite_code" class="form-label fs-5 fw-bold mb-3">
+                                    <i class="fas fa-key me-2"></i>请输入邀请码
+                                </label>
+                                <input type="text" 
+                                       class="form-control form-control-lg invite-code-input" 
+                                       id="invite_code" 
+                                       name="invite_code" 
+                                       placeholder="例如：AB12CD34"
+                                       required 
+                                       autofocus
+                                       autocomplete="off"
+                                       maxlength="20">
+                                <div class="form-text mt-2">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    邀请码由问卷创建者提供，通常是8-20位字母和数字的组合
+                                </div>
+                            </div>
+                            
+                            <div class="d-grid gap-3">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    <i class="fas fa-check-circle me-2"></i>验证邀请码并继续
+                                </button>
+                                
+                                <!-- 如果是已登录用户，提供快捷方式 -->
+                                {% if user.is_authenticated %}
+                                <div class="text-center">
+                                    <small class="text-muted">
+                                        当前登录用户: {{ user.username }}
+                                    </small>
+                                </div>
+                                {% else %}
+                                <div class="text-center">
+                                    <small class="text-muted">
+                                        验证成功后，系统将引导您登录账户
+                                    </small>
+                                </div>
+                                {% endif %}
+                                
+                                <a href="{% url 'home' %}" class="btn btn-outline-secondary">
+                                    <i class="fas fa-arrow-left me-2"></i>返回首页
+                                </a>
+                            </div>
+                        </form>
+                        
+                        <!-- 帮助信息 -->
+                        <div class="alert alert-light mt-4">
+                            <h6><i class="fas fa-question-circle me-2"></i>常见问题解答</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <ul class="mb-0">
+                                        <li><small><strong>如何获取邀请码？</strong> 请联系问卷创建者或组织者</small></li>
+                                        <li><small><strong>邀请码输入错误？</strong> 请检查大小写和特殊字符</small></li>
+                                    </ul>
+                                </div>
+                                <div class="col-md-6">
+                                    <ul class="mb-0">
+                                        <li><small><strong>没有账户？</strong> 验证成功后可以注册账户</small></li>
+                                        <li><small><strong>遇到问题？</strong> 请联系网站管理员</small></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 自动将输入转换为大写
+        document.getElementById('invite_code').addEventListener('input', function(e) {
+            this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        });
+        
+        // 自动聚焦并选中所有文本
+        document.getElementById('invite_code').addEventListener('click', function() {
+            this.select();
+        });
+        
+        // 表单提交前验证
+        document.querySelector('form').addEventListener('submit', function(e) {
+            const inviteCode = document.getElementById('invite_code').value;
+            if (inviteCode.length < 4) {
+                e.preventDefault();
+                alert('请输入有效的邀请码（至少4个字符）');
+                return false;
+            }
+            return true;
+        });
+    </script>
+</body>
+</html>

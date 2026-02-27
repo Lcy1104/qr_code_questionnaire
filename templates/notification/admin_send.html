@@ -1,0 +1,151 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}发送通知 - 管理员{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'admin_dashboard' %}">系统管理</a></li>
+            <li class="breadcrumb-item active">发送通知</li>
+        </ol>
+    </nav>
+
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="fas fa-bullhorn me-2"></i>发送通知</h5>
+        </div>
+        <div class="card-body">
+            <form id="notificationForm" method="POST">
+                {% csrf_token %}
+                
+                <div class="mb-3">
+                    <label for="title" class="form-label">通知标题 *</label>
+                    <input type="text" class="form-control" id="title" name="title" required
+                           placeholder="请输入通知标题">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="message" class="form-label">通知内容 *</label>
+                    <textarea class="form-control" id="message" name="message" rows="5" required
+                              placeholder="请输入通知内容"></textarea>
+                </div>
+                
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="notification_type" class="form-label">通知类型</label>
+                        <select class="form-select" id="notification_type" name="notification_type">
+                            {% for type_code, type_name in notification_types %}
+                                <option value="{{ type_code }}">{{ type_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <label for="target_type" class="form-label">发送对象</label>
+                        <select class="form-select" id="target_type" name="target_type">
+                            {% for type_code, type_name in target_types %}
+                                <option value="{{ type_code }}">{{ type_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="mb-3" id="userSelection" style="display: none;">
+                    <label class="form-label">选择用户</label>
+                    <div style="max-height: 200px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 0.25rem; padding: 10px;">
+                        {% for user in users %}
+                        <div class="form-check">
+                            <input class="form-check-input user-checkbox" type="checkbox" 
+                                   name="target_users" value="{{ user.id }}" id="user_{{ user.id }}">
+                            <label class="form-check-label" for="user_{{ user.id }}">
+                                {{ user.username }}
+                                {% if user.email %}({{ user.email }}){% endif %}
+                            </label>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <small class="text-muted">按住Ctrl键可以多选</small>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    注意：发送通知后，所有符合条件的用户都会收到通知。请谨慎操作。
+                </div>
+                
+                <div class="d-flex justify-content-between">
+                    <a href="{% url 'admin_dashboard' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left me-1"></i>返回
+                    </a>
+                    <button type="submit" class="btn btn-primary" id="sendButton">
+                        <i class="fas fa-paper-plane me-1"></i>发送通知
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const targetTypeSelect = document.getElementById('target_type');
+    const userSelectionDiv = document.getElementById('userSelection');
+    
+    // 显示/隐藏用户选择
+    function toggleUserSelection() {
+        if (targetTypeSelect.value === 'selected') {
+            userSelectionDiv.style.display = 'block';
+        } else {
+            userSelectionDiv.style.display = 'none';
+        }
+    }
+    
+    targetTypeSelect.addEventListener('change', toggleUserSelection);
+    toggleUserSelection(); // 初始化
+    
+    // 表单提交
+    const form = document.getElementById('notificationForm');
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        const sendButton = document.getElementById('sendButton');
+        const originalText = sendButton.innerHTML;
+        sendButton.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>发送中...';
+        sendButton.disabled = true;
+        
+        const formData = new FormData(form);
+        
+        fetch('', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('发送成功！' + data.message);
+                form.reset();
+                // 重置用户选择
+                document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+                    checkbox.checked = false;
+                });
+            } else {
+                alert('发送失败：' + data.message);
+            }
+        })
+        .catch(error => {
+            alert('发送失败：网络错误');
+            console.error('Error:', error);
+        })
+        .finally(() => {
+            sendButton.innerHTML = originalText;
+            sendButton.disabled = false;
+        });
+    });
+});
+</script>
+{% endblock %}

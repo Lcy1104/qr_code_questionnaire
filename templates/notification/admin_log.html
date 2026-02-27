@@ -1,0 +1,169 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}通知日志 - 管理员{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'admin_dashboard' %}">系统管理</a></li>
+            <li class="breadcrumb-item active">通知日志</li>
+        </ol>
+    </nav>
+
+    <div class="card">
+        <div class="card-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="fas fa-history me-2"></i>通知发送日志</h5>
+                <a href="{% url 'admin_send_notification' %}" class="btn btn-primary btn-sm">
+                    <i class="fas fa-plus me-1"></i>发送新通知
+                </a>
+            </div>
+        </div>
+        
+        <div class="card-body">
+            <!-- 过滤表单 -->
+            <form method="GET" class="row g-3 mb-4">
+                <div class="col-md-3">
+                    <label for="type" class="form-label">通知类型</label>
+                    <select class="form-select" id="type" name="type">
+                        <option value="">所有类型</option>
+                        {% for type_code, type_name in notification_types %}
+                            <option value="{{ type_code }}" {% if current_type == type_code %}selected{% endif %}>
+                                {{ type_name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="col-md-3">
+                    <label for="user_id" class="form-label">接收用户</label>
+                    <select class="form-select" id="user_id" name="user_id">
+                        <option value="">所有用户</option>
+                        {% for user in users %}
+                            <option value="{{ user.id }}" {% if current_user_id == user.id|stringformat:"s" %}selected{% endif %}>
+                                {{ user.username }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="col-md-4">
+                    <label for="search" class="form-label">搜索</label>
+                    <input type="text" class="form-control" id="search" name="search" 
+                           placeholder="搜索标题、内容或用户名" value="{{ search }}">
+                </div>
+                
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search me-1"></i>筛选
+                    </button>
+                </div>
+            </form>
+            
+            <!-- 通知列表 -->
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>标题</th>
+                            <th>接收用户</th>
+                            <th>类型</th>
+                            <th>状态</th>
+                            <th>发送时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for notification in notifications %}
+                        <tr>
+                            <td><small class="text-muted">{{ notification.id|slice:"-8:" }}</small></td>
+                            <td>{{ notification.title|truncatechars:30 }}</td>
+                            <td>
+                                <a href="{% url 'user_detail' notification.user.id %}" class="text-decoration-none">
+                                    {{ notification.user.username }}
+                                </a>
+                            </td>
+                            <td>
+                                <span class="badge 
+                                    {% if notification.notification_type == 'questionnaire_update' %}bg-info
+                                    {% elif notification.notification_type == 'admin' %}bg-danger
+                                    {% elif notification.notification_type == 'system' %}bg-primary
+                                    {% else %}bg-secondary{% endif %}">
+                                    {{ notification.get_notification_type_display }}
+                                </span>
+                            </td>
+                            <td>
+                                {% if notification.is_read %}
+                                    <span class="badge bg-success">已读</span>
+                                {% else %}
+                                    <span class="badge bg-warning">未读</span>
+                                {% endif %}
+                            </td>
+                            <td><small>{{ notification.created_at|date:"Y-m-d H:i" }}</small></td>
+                            <td>
+                                <a href="{% url 'notification_detail' notification.id %}" 
+                                   class="btn btn-sm btn-outline-primary" title="查看详情">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="7" class="text-center py-4">
+                                <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                                <p class="text-muted">暂无通知记录</p>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- 分页 -->
+            {% if page_obj.paginator.num_pages > 1 %}
+            <nav class="mt-4">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page=1{% if current_type %}&type={{ current_type }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if search %}&search={{ search }}{% endif %}">首页</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if current_type %}&type={{ current_type }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if search %}&search={{ search }}{% endif %}">上一页</a>
+                        </li>
+                    {% endif %}
+
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if page_obj.number == num %}
+                            <li class="page-item active">
+                                <span class="page-link">{{ num }}</span>
+                            </li>
+                        {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ num }}{% if current_type %}&type={{ current_type }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if page_obj.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if current_type %}&type={{ current_type }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if search %}&search={{ search }}{% endif %}">下一页</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{% if current_type %}&type={{ current_type }}{% endif %}{% if current_user_id %}&user_id={{ current_user_id }}{% endif %}{% if search %}&search={{ search }}{% endif %}">末页</a>
+                        </li>
+                    {% endif %}
+                </ul>
+                <p class="text-center text-muted">
+                    第 {{ page_obj.number }} 页，共 {{ page_obj.paginator.num_pages }} 页，
+                    总计 {{ page_obj.paginator.count }} 条记录
+                </p>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

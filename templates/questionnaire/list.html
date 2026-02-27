@@ -1,0 +1,558 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>{% if is_admin %}问卷管理{% else %}我的问卷{% endif %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .card.mb-3{ border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.06); border:none; }
+    .card.mb-3 .card-body{ padding:.5rem .75rem; }
+    #filterForm .col{ margin-bottom:0; }
+    #filterForm label{ font-size:.75rem; }
+    #filterForm select{ font-size:.75rem; }
+    #batchBar{ margin-top:.5rem; }
+    /* 关键：复选框默认隐藏 */
+    .check-holder{ display:none; }
+    .card-hover:hover{ transform:translateY(-3px); box-shadow:0 5px 15px rgba(0,0,0,.1); transition:all .3s; }
+    .status-badge{ font-size:.75rem; }
+    .card-clickable{ cursor:pointer; position:relative; }
+    .card-clickable:hover::before{ content:''; position:absolute; inset:0; background:rgba(0,0,0,.03); border-radius:8px; }
+    .dropdown,.dropdown *{ cursor:default; }
+    .dropdown button,.dropdown a{ cursor:pointer; }
+    .card {
+    overflow: visible !important;
+    }
+    .card-body {
+        overflow: visible !important;
+    }
+    .dropdown-menu {
+    z-index: 1060 !important;          /* 高于 Bootstrap 默认 1000 */
+    background-color: #fff !important;  /* 确保背景不透明，覆盖下方内容 */
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15); /* 可选，增加视觉区分 */
+    }
+    /* 当下拉菜单打开时，禁用卡片的悬停效果 */
+    .card.dropdown-open .card-clickable:hover::before {
+        display: none !important;
+    }
+    /* 当下拉菜单打开时，完全禁用当前卡片的悬停效果 */
+    .card.dropdown-open:hover {
+        transform: none !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,.06) !important; /* 恢复默认阴影 */
+    }
+    .card.dropdown-open .card-clickable:hover::before {
+        display: none !important;
+    }
+  </style>
+</head>
+<body>
+{% include 'navbar.html' %}
+
+<!-- 1. 顶部固定栏 -->
+<div class="container mt-4" id="topBar">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h1>{% if is_admin %}问卷管理{% else %}我的问卷{% endif %}</h1>
+      <p class="text-muted mb-0">
+          符合筛选条件：<span id="totalCount">{{ questionnaires.count }}</span> 份问卷
+          <span id="originalCount" class="d-none" data-val="{{ questionnaires.count }}"></span>
+      </p>
+    </div>
+    <a href="{% url 'create_questionnaire' %}" class="btn btn-primary">
+      <i class="fas fa-plus me-2"></i>创建新问卷
+    </a>
+  </div>
+</div>
+
+<!-- 2. 筛选条 -->
+<div class="container mt-3">
+  <div class="card mb-3 shadow-sm">
+    <div class="card-body py-2">
+      <form id="filterForm" class="row row-cols-2 row-cols-md-8 g-2 align-items-center">
+        <div class="col">
+          <label class="form-label mb-1 fw-bold small">状态</label>
+          <select name="status" class="form-select form-select-sm rounded-pill">
+            <option value="">全部</option>
+            <option value="draft" {% if request.GET.status == 'draft' %}selected{% endif %}>草稿</option>
+            <option value="published" {% if request.GET.status == 'published' %}selected{% endif %}>已发布</option>
+            <option value="closed" {% if request.GET.status == 'closed' %}selected{% endif %}>已关闭</option>
+          </select>
+        </div>
+        <div class="col">
+          <label class="form-label mb-1 fw-bold small">邀请码</label>
+          <select name="has_invite" class="form-select form-select-sm rounded-pill">
+            <option value="">全部</option>
+            <option value="1" {% if request.GET.has_invite == '1' %}selected{% endif %}>有</option>
+            <option value="0" {% if request.GET.has_invite == '0' %}selected{% endif %}>无</option>
+          </select>
+        </div>
+        <div class="col">
+          <label class="form-label mb-1 fw-bold small">回答</label>
+          <select name="has_response" class="form-select form-select-sm rounded-pill">
+            <option value="">全部</option>
+            <option value="1" {% if request.GET.has_response == '1' %}selected{% endif %}>有回答</option>
+            <option value="0" {% if request.GET.has_response == '0' %}selected{% endif %}>无回答</option>
+          </select>
+        </div>
+        <div class="col d-flex align-items-end">
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill w-100" id="doFilter">筛选</button>
+        </div>
+        <div class="col d-flex align-items-end">
+          <a href="{% url 'questionnaire_list' %}" class="btn btn-sm btn-outline-secondary rounded-pill w-100">重置</a>
+        </div>
+        <div class="col d-flex align-items-end">
+          <button type="button" class="btn btn-sm btn-outline-dark rounded-pill w-100" id="batchToggle">
+            <i class="fas fa-tasks me-1"></i>批量
+          </button>
+        </div>
+        <div class="col d-flex align-items-end">
+          <span class="text-muted small" id="filterCount">共 {{ questionnaires.count }} 份</span>
+        </div>
+        <div class="col d-flex align-items-end">
+          <span class="text-muted small">已选 <span id="selectedCount">0</span></span>
+        </div>
+      </form>
+
+      <!-- 批量按钮区 -->
+      <div class="mt-2 d-none" id="batchBar">
+        <div class="d-flex justify-content-end align-items-center gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="checkAllBtn">全选</button>
+          <button id="batchPublish" class="btn btn-sm btn-success">发布</button>
+          <button id="batchDelete" class="btn btn-sm btn-danger">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 3. 问卷列表 -->
+<div class="container mt-4">
+  {% if questionnaires %}
+    <div class="row" id="cardRow">
+      {% for q in questionnaires %}
+        <div class="col-md-6 col-lg-4 mb-4">
+          <div class="card card-hover card-clickable h-100 position-relative"
+               onclick="window.location.href='{% url 'dashboard_questionnaire_detail' q.id %}'">
+            <div class="card-body">
+              <!-- 复选框 -->
+              <div class="position-absolute top-0 start-0 m-2 check-holder">
+                <input type="checkbox" class="row-check" value="{{ q.id }}" onclick="event.stopPropagation();">
+              </div>
+
+              <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                  <h5 class="card-title mb-1 text-dark">{{ q.title|truncatechars:25 }}</h5>
+                  {% for color, text in q.derived_statuses %}
+                      <span class="badge bg-{{ color }} status-badge me-1">{{ text }}</span>
+                  {% endfor %}
+                  <span class="d-none invite-mark">{{ q.invite_code|yesno:'1,0' }}</span>
+                  <span class="d-none resp-mark">{{ q.resp_cnt|yesno:'1,0' }}</span>
+                </div>
+                <!-- 下拉操作菜单 -->
+                <div class="dropdown" onclick="event.stopPropagation();">
+                  <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" data-bs-boundary="viewport">操作</button>
+                  <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="{% url 'dashboard_questionnaire_detail' q.id %}"><i class="fas fa-eye me-2"></i>查看详情</a></li>
+                    {% if q.creator == request.user or is_admin %}
+                        <li><a class="dropdown-item" href="{% url 'edit_questionnaire' q.id %}"><i class="fas fa-edit me-2"></i>编辑问卷</a></li>
+                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#timeModal{{ q.id }}"><i class="fas fa-clock me-2"></i>修改开始/截止时间</a></li>
+                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#limitModal{{ q.id }}"><i class="fas fa-chart-line me-2"></i>修改提交份数限制</a></li>
+                    {% endif %}
+                    {% if q.status == 'draft' and q.creator == request.user %}
+                      <li><a class="dropdown-item" href="{% url 'publish_questionnaire' q.id %}"><i class="fas fa-paper-plane me-2"></i>发布问卷</a></li>
+                    {% endif %}
+                    <li><a class="dropdown-item" href="{% url 'survey_form' q.id %}"><i class="fas fa-play-circle me-2"></i>填写问卷</a></li>
+                    {% if q.creator == request.user or is_admin %}
+                      <li><hr class="dropdown-divider"></li>
+                      <li><a class="dropdown-item text-danger" href="#"
+                             data-bs-toggle="modal" data-bs-target="#deleteModal{{ q.id }}">
+                        <i class="fas fa-trash me-2"></i>删除问卷</a></li>
+                    {% endif %}
+                  </ul>
+                </div>
+              </div>
+
+              <p class="card-text text-muted small mb-3">{{ q.description|truncatechars:80|default:'暂无描述' }}</p>
+              <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">创建者: {{ q.creator.username }}</small>
+                <small class="text-muted">{{ q.created_at|date:'m-d' }}</small>
+              </div>
+              <div class="mt-3 d-flex justify-content-between small text-muted">
+                <span><i class="fas fa-eye me-1"></i>{{ q.view_count }}</span>
+                <span><i class="fas fa-check-circle me-1"></i>{{ q.submit_count }}</span>
+                <span><i class="fas fa-question-circle me-1"></i>{{ q.questions.count }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {% if q.creator == request.user or is_admin %}
+        <!-- 修改时间模态框 -->
+<div class="modal fade" id="timeModal{{ q.id }}" tabindex="-1" aria-labelledby="timeModalLabel{{ q.id }}" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="timeModalLabel{{ q.id }}">修改开始/截止时间 - {{ q.title|truncatechars:20 }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form class="time-update-form" data-id="{{ q.id }}" data-detail-url="{% url 'dashboard_questionnaire_detail' q.id %}">
+        {% csrf_token %}
+        <div class="modal-body">
+          <!-- 开始时间 -->
+          <div class="mb-3">
+            <label class="form-label">开始时间</label>
+            <div class="d-flex align-items-start flex-wrap">
+              <select class="form-select me-2 mb-2 start-time-option" style="width: auto; min-width: 120px;">
+                <option value="none" {% if not q.start_time %}selected{% endif %}>立即开始</option>
+                <option value="custom" {% if q.start_time %}selected{% endif %}>自定义</option>
+              </select>
+              <div class="start-time-input" {% if not q.start_time %}style="display: none;"{% endif %}>
+                <input type="datetime-local" name="start_time" class="form-control" value="{{ q.start_time|date:'Y-m-d\TH:i' }}">
+              </div>
+            </div>
+          </div>
+          <!-- 截止时间 -->
+          <div class="mb-3">
+            <label class="form-label">截止时间</label>
+            <div class="d-flex align-items-start flex-wrap">
+              <select class="form-select me-2 mb-2 end-time-option" style="width: auto; min-width: 120px;">
+                <option value="none" {% if not q.end_time %}selected{% endif %}>永不结束</option>
+                <option value="custom" {% if q.end_time %}selected{% endif %}>自定义</option>
+              </select>
+              <div class="end-time-input" {% if not q.end_time %}style="display: none;"{% endif %}>
+                <input type="datetime-local" name="end_time" class="form-control" value="{{ q.end_time|date:'Y-m-d\TH:i' }}">
+              </div>
+            </div>
+          </div>
+          <!-- 错误提示区域 -->
+          <div class="time-error-msg text-danger mt-2" style="display: none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+<!-- 修改份数限制模态框 -->
+<div class="modal fade" id="limitModal{{ q.id }}" tabindex="-1" aria-labelledby="limitModalLabel{{ q.id }}" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="limitModalLabel{{ q.id }}">修改提交份数限制 - {{ q.title|truncatechars:20 }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+      </div>
+      <form class="limit-update-form" data-id="{{ q.id }}" data-detail-url="{% url 'dashboard_questionnaire_detail' q.id %}">
+        {% csrf_token %}
+        <div class="modal-body">
+          <div class="mb-3 form-check">
+            <input type="checkbox" class="form-check-input" name="limit_responses" id="limitCheck{{ q.id }}" {% if q.limit_responses %}checked{% endif %}>
+            <label class="form-check-label" for="limitCheck{{ q.id }}">限制提交份数</label>
+          </div>
+          <div class="mb-3 max-field" {% if not q.limit_responses %}style="display: none;"{% endif %}>
+            <label class="form-label">最大提交份数</label>
+            <input type="number" name="max_responses" class="form-control" min="1" value="{{ q.max_responses|default:'' }}">
+          </div>
+          <!-- 错误提示区域 -->
+          <div class="limit-error-msg text-danger mt-2" style="display: none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+        <!-- 单份删除弹窗 -->
+        {% if q.creator == request.user or is_admin %}
+          <div class="modal fade" id="deleteModal{{ q.id }}" tabindex="-1">
+            <div class="modal-dialog">
+              <div class="modal-content">
+                <div class="modal-header"><h5 class="modal-title">确认删除问卷</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                  <p>您确定要删除问卷 <strong>「{{ q.title }}」</strong> 吗？</p>
+                  <p class="text-danger">此操作不可恢复，问卷的所有问题和回答都将被删除！</p>
+                </div>
+                <div class="modal-footer">
+                  <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                  <form method="post" action="{% url 'delete_questionnaire' q.id %}">{% csrf_token %}
+                    <button type="submit" class="btn btn-danger">确认删除</button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="text-center py-5">
+      <i class="fas fa-inbox fa-4x text-muted mb-4"></i>
+      <h4 class="text-muted">暂无问卷</h4>
+      <p class="text-muted mb-4">创建您的第一份问卷来开始收集数据吧！</p>
+      <a href="{% url 'create_questionnaire' %}" class="btn btn-primary btn-lg"><i class="fas fa-plus me-2"></i>创建问卷</a>
+    </div>
+  {% endif %}
+  {% csrf_token %}
+  <!-- 友好提示框 -->
+  <div id="taskResult" class="alert alert-info d-none mt-3"></div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// 下拉菜单显示/隐藏时控制卡片的悬停效果
+document.querySelectorAll('[data-bs-toggle="dropdown"]').forEach(button => {
+    // 菜单显示时
+    button.addEventListener('shown.bs.dropdown', function (e) {
+        // 关闭所有其他下拉菜单（保持您原有的逻辑）
+        document.querySelectorAll('[data-bs-toggle="dropdown"]').forEach(otherBtn => {
+            if (otherBtn !== e.target) {
+                const dropdown = bootstrap.Dropdown.getInstance(otherBtn);
+                if (dropdown) dropdown.hide();
+            }
+        });
+        // 给当前卡片添加类，禁用悬停效果
+        const card = e.target.closest('.card');
+        if (card) card.classList.add('dropdown-open');
+    });
+
+    // 菜单隐藏时
+    button.addEventListener('hidden.bs.dropdown', function (e) {
+        const card = e.target.closest('.card');
+        if (card) card.classList.remove('dropdown-open');
+    });
+});
+// 时间下拉切换
+$(document).on('change', '.start-time-option', function() {
+    var container = $(this).closest('.modal-body').find('.start-time-input');
+    if ($(this).val() === 'none') {
+        container.hide().find('input').val('');
+    } else {
+        container.show();
+    }
+});
+$(document).on('change', '.end-time-option', function() {
+    var container = $(this).closest('.modal-body').find('.end-time-input');
+    if ($(this).val() === 'none') {
+        container.hide().find('input').val('');
+    } else {
+        container.show();
+    }
+});
+
+// 份数限制复选框切换
+$(document).on('change', '[name="limit_responses"]', function() {
+    var maxField = $(this).closest('.modal-body').find('.max-field');
+    if ($(this).is(':checked')) {
+        maxField.show();
+    } else {
+        maxField.hide().find('input').val('');
+    }
+});
+
+// 时间修改表单提交
+$('.time-update-form').on('submit', function(e) {
+    e.preventDefault();
+    var form = $(this);
+    var id = form.data('id');
+    var detailUrl = form.data('detail-url');
+    var errorDiv = form.find('.time-error-msg');
+    errorDiv.hide().empty();
+
+    var data = {
+        start_time: form.find('.start-time-option').val() === 'none' ? '' : form.find('[name="start_time"]').val(),
+        end_time: form.find('.end-time-option').val() === 'none' ? '' : form.find('[name="end_time"]').val(),
+        csrfmiddlewaretoken: form.find('[name=csrfmiddlewaretoken]').val()
+    };
+
+    $.ajax({
+        url: '/questionnaires/' + id + '/update-time/',
+        type: 'POST',
+        data: data,
+        success: function(res) {
+            if (res.success) {
+                window.location.href = detailUrl;
+            } else {
+                errorDiv.text(res.message).show();
+            }
+        },
+        error: function(xhr) {
+            errorDiv.text('请求失败，请重试').show();
+        }
+    });
+});
+
+// 份数限制表单提交
+$('.limit-update-form').on('submit', function(e) {
+    e.preventDefault();
+    var form = $(this);
+    var id = form.data('id');
+    var detailUrl = form.data('detail-url');
+    var errorDiv = form.find('.limit-error-msg');
+    errorDiv.hide().empty();
+
+    var data = {
+        limit_responses: form.find('[name="limit_responses"]').is(':checked') ? 'on' : '',
+        max_responses: form.find('[name="max_responses"]').val(),
+        csrfmiddlewaretoken: form.find('[name=csrfmiddlewaretoken]').val()
+    };
+
+    $.ajax({
+        url: '/questionnaires/' + id + '/update-limit/',
+        type: 'POST',
+        data: data,
+        success: function(res) {
+            if (res.success) {
+                window.location.href = detailUrl;
+            } else {
+                errorDiv.text(res.message).show();
+            }
+        },
+        error: function(xhr) {
+            errorDiv.text('请求失败，请重试').show();
+        }
+    });
+});
+/* ----------- 筛选 ----------- */
+function liveFilter(){
+  const st  = $('[name=status]').val();
+  const inv = $('[name=has_invite]').val();
+  const resp= $('[name=has_response]').val();
+  $('.col-md-6.col-lg-4').each(function(){
+    const card    = $(this);
+    const status  = card.find('.status-badge').hasClass('bg-warning') ? 'draft' :
+                    card.find('.status-badge').hasClass('bg-success') ? 'published' : 'closed';
+    const hasInv  = card.find('.invite-mark').text().trim();
+    const hasResp = card.find('.resp-mark').text().trim();
+    const okStatus= !st  || status === st;
+    const okInv   = !inv || hasInv === inv;
+    const okResp  = !resp|| hasResp === resp;
+    card.toggle(okStatus && okInv && okResp);
+  });
+  updateCount();
+}
+$('#doFilter').click(liveFilter);
+$('#filterForm select').on('change', liveFilter);
+
+/* ----------- 计数 ----------- */
+function updateCount(){
+  const original = parseInt($('#originalCount').data('val'), 10) || 0;
+  const hasFilter = $('[name=status]').val() ||
+                  $('[name=has_invite]').val() ||
+                  $('[name=has_response]').val();
+
+  // 关键：无筛选 = 用当前真实卡片数当最新总数，再写回 original 字段
+  const visible = hasFilter
+        ? $('.col-md-6.col-lg-4:visible').length
+        : $('.col-md-6.col-lg-4').length;   // 全部卡片（含删除后）
+
+  // 立即把最新总数写回隐藏字段，保证下次重置也不丢
+  $('#originalCount').data('val', visible);
+
+  $('#totalCount').text(visible);
+  $('#topText').text(
+    hasFilter
+      ? `符合筛选条件：${visible} 份问卷`
+      : ({{ is_admin|yesno:"true,false" }} ? `系统中共有 ${visible} 份问卷` : `您共有 ${visible} 份问卷`)
+  );
+  $('#filterCount').text(`共 ${visible} 份`);
+}
+updateCount(); // 初始
+
+/* ----------- 批量 ----------- */
+$('#batchToggle').click(() => {
+  $('#batchBar').toggleClass('d-none');
+  $('.check-holder').toggle();          // 复选框出现/隐藏
+});
+function toggleBatchBar(){
+  const n = $('.row-check:checked').length;
+  $('#selectedCount').text(n);
+  $('#batchBar').toggleClass('d-none', n === 0);
+}
+$(document).on('change', '.row-check', toggleBatchBar);
+
+/* ----------- 批量删除 ----------- */
+function checkedIds(){
+  return $('.row-check:checked').map(function(){ return $(this).val(); }).get();
+}
+function sendAction(action, ids){
+  $.ajax({
+    url: '{% url "ajax_batch_operate" %}',
+    type: 'POST',
+    data: {action: action, ids: JSON.stringify(ids)},
+    headers: {'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()},
+    success: function(res){
+      $('#taskResult').removeClass('d-none').text(res.message);
+      if (action === 'delete') setTimeout(() => location.reload(), 600);
+      else if (res.task_id) pollResult(res.task_id);
+    }
+  });
+}
+$('#batchDelete').click(() => {
+  const n = checkedIds().length;
+  if (!n) return;
+  if (confirm(`确定删除选中的 ${n} 份问卷？此操作不可恢复！`)) {
+    sendAction('delete', checkedIds());
+  }
+});
+$('#batchPublish').click(() => sendAction('publish', checkedIds()));
+
+/* ----------- 全选 ----------- */
+$('#checkAllBtn').click(function () {
+  const unchecked = $('.row-check:not(:checked)').length;
+  $('.row-check').prop('checked', !!unchecked);
+  $(this).text(unchecked ? '全不选' : '全选');
+  toggleBatchBar();
+});
+/* ----------- 发布按钮灰掉 ----------- */
+function updatePublishBtn(){
+  const hasNonDraft = $('.row-check:checked').closest('.col-md-6')
+                      .find('.status-badge:not(.bg-warning)').length > 0;
+  $('#batchPublish').prop('disabled', hasNonDraft).toggleClass('d-none', hasNonDraft);
+}
+$(document).on('change', '.row-check', updatePublishBtn);
+/* ===== 重置按钮 ===== */
+$('#resetFilter').click(() => {
+  $('#filterForm select').val('');   // 1. 清空下拉
+  liveFilter();                      // 2. 显示全部卡片
+  updateCount();                     // 3. 恢复顶部文案 & 数字
+});
+// ========== 模态框焦点修复 ==========
+document.querySelectorAll('.modal').forEach(modal => {
+    modal.addEventListener('hidden.bs.modal', function (e) {
+        const triggerButton = e.relatedTarget; // 触发模态框的按钮
+        if (triggerButton && triggerButton.focus) {
+            triggerButton.focus();
+        }
+    });
+});
+// ========== 打开模态框前关闭所有下拉菜单 ==========
+$(document).on('click', '[data-bs-toggle="modal"]', function() {
+    document.querySelectorAll('[data-bs-toggle="dropdown"]').forEach(btn => {
+        const dropdown = bootstrap.Dropdown.getInstance(btn);
+        if (dropdown) dropdown.hide();
+    });
+});
+
+// ========== 模态框显示后将焦点移入模态框 ==========
+document.querySelectorAll('.modal').forEach(modal => {
+    modal.addEventListener('shown.bs.modal', function () {
+        // 优先聚焦到关闭按钮（×）
+        const closeBtn = this.querySelector('.btn-close');
+        if (closeBtn) {
+            closeBtn.focus();
+        } else {
+            // 否则聚焦到第一个可聚焦元素
+            const firstFocusable = this.querySelector('input, button, select, textarea, [tabindex]:not([tabindex="-1"])');
+            if (firstFocusable) firstFocusable.focus();
+        }
+    });
+});
+</script>
+</body>
+</html>

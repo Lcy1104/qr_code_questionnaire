@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>编辑问卷 - {{ questionnaire.title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .option-input.is-invalid {
+            border-color: #dc3545 !important;
+        }
+        .question-item {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background: #f8f9fa;
+        }
+        .form-section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #dee2e6;
+        }
+        .option-input-group {
+            margin-bottom: 8px;
+        }
+        .option-letter {
+            width: 40px;
+            font-weight: bold;
+            text-align: center;
+        }
+        [name$="-DELETE"] {
+            display: none !important;
+        }
+        [name$="-id"] {
+            display: none !important;
+        }
+        [required] + label::after {
+            content: " *";
+            color: #dc3545;
+        }
+        .question-error {
+            border: 1px solid #dc3545 !important;
+        }
+        .question-error-message {
+            color: #dc3545;
+            font-size: 0.875rem;
+            margin-top: 5px;
+        }
+        .options-textarea {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    {% include 'navbar.html' %}
+
+    <div class="container mt-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'questionnaire_list' %}">问卷列表</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'dashboard_questionnaire_detail' questionnaire.id %}">{{ questionnaire.title|truncatechars:30 }}</a></li>
+                <li class="breadcrumb-item active">编辑问卷</li>
+            </ol>
+        </nav>
+
+        <div class="row">
+            <div class="col-lg-10 mx-auto">
+                <div class="card">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                        <h4 class="mb-0"><i class="fas fa-edit me-2"></i>编辑问卷</h4>
+                        <span class="badge {% if questionnaire.status == 'published' %}bg-success{% elif questionnaire.status == 'draft' %}bg-warning{% else %}bg-secondary{% endif %}">
+                            {{ questionnaire.get_status_display }}
+                        </span>
+                    </div>
+                    <div class="card-body">
+                        <form method="post" id="questionnaireForm" action="">
+                            {% csrf_token %}
+
+                            <!-- 显示表单错误 -->
+                            {% if form.errors or form.non_field_errors or question_formset.errors or question_formset.non_form_errors %}
+                                <div class="alert alert-danger">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    <strong>请修正以下错误：</strong>
+                                    <ul class="mb-0 mt-2">
+                                        {# 主表单 #}
+                                        {% for e in form.non_field_errors %}
+                                            <li><b>（全局）</b>{{ e }}</li>
+                                        {% endfor %}
+                                        {% for field, errors in form.errors.items %}
+                                            <li><b>问卷-{{ field }}：</b>{{ errors|join:', ' }}</li>
+                                        {% endfor %}
+                                        {# 问题表单集 #}
+                                        {% for form in question_formset %}
+                                            {% if form.errors or form.non_field_errors %}
+                                                <li><b>问题{{ forloop.counter }}</b>
+                                                    <ul class="mb-0">
+                                                        {% for field, errors in form.errors.items %}
+                                                            <li>{{ field }}：{{ errors|join:', ' }}</li>
+                                                        {% endfor %}
+                                                        {% for e in form.non_field_errors %}
+                                                            <li>（非字段）{{ e }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                </li>
+                                            {% endif %}
+                                        {% endfor %}
+                                        {% for e in question_formset.non_form_errors %}
+                                            <li><b>（问题集）</b>{{ e }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                            {% endif %}
+
+                            <!-- 问卷基本信息 -->
+                            <div class="form-section">
+                                <h5 class="mb-3">问卷信息</h5>
+
+                                <div class="row">
+                                    <div class="col-md-8 mb-3">
+                                        <label for="{{ form.title.id_for_label }}" class="form-label">
+                                            问卷标题 <span class="text-danger">*</span>
+                                        </label>
+                                        {{ form.title }}
+                                        {% if form.title.errors %}
+                                        <div class="text-danger small mt-1">{{ form.title.errors }}</div>
+                                        {% endif %}
+                                    </div>
+
+                                    <div class="col-md-4 mb-3">
+                                        <label for="{{ form.access_type.id_for_label }}" class="form-label">
+                                            访问权限
+                                        </label>
+                                        {{ form.access_type }}
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="{{ form.description.id_for_label }}" class="form-label">
+                                        问卷描述
+                                    </label>
+                                    {{ form.description }}
+                                    <div class="form-text">
+                                        可选，描述问卷的目的和内容
+                                    </div>
+                                </div>
+                                <!-- 开始时间 -->
+                                <div class="mb-3">
+                                    <label class="form-label">开始时间</label>
+                                    <div class="d-flex align-items-start flex-wrap">
+                                        <select class="form-select me-2 mb-2 start-time-option" style="width: auto; min-width: 140px;">
+                                            <option value="none" {% if not form.start_time.value %}selected{% endif %}>立即开始</option>
+                                            <option value="custom" {% if form.start_time.value %}selected{% endif %}>自定义开始时间</option>
+                                        </select>
+                                        <div class="start-time-input" {% if not form.start_time.value %}style="display: none;"{% endif %}>
+                                            {{ form.start_time }}
+                                        </div>
+                                    </div>
+                                    <div class="form-text">选择“立即开始”则问卷发布后即刻生效</div>
+                                </div>
+                                
+                                <!-- 截止时间 -->
+                                <div class="mb-3">
+                                    <label class="form-label">截止时间</label>
+                                    <div class="d-flex align-items-start flex-wrap">
+                                        <select class="form-select me-2 mb-2 end-time-option" style="width: auto; min-width: 140px;">
+                                            <option value="none" {% if not form.end_time.value %}selected{% endif %}>永不结束</option>
+                                            <option value="custom" {% if form.end_time.value %}selected{% endif %}>自定义截止时间</option>
+                                        </select>
+                                        <div class="end-time-input" {% if not form.end_time.value %}style="display: none;"{% endif %}>
+                                            {{ form.end_time }}
+                                        </div>
+                                    </div>
+                                    <div class="form-text">选择“永不结束”则问卷长期有效</div>
+                                </div>
+                                
+                                <!-- 份数限制 -->
+                                <div class="mb-3">
+                                    <div class="form-check mb-2">
+                                        {{ form.limit_responses }}
+                                        <label class="form-check-label" for="{{ form.limit_responses.id_for_label }}">
+                                            限制提交份数
+                                        </label>
+                                    </div>
+                                    <div id="maxResponsesField" style="display: none;">
+                                        {{ form.max_responses }}
+                                        <div class="form-text">设置问卷最多能收集的答卷数量</div>
+                                    </div>
+                                </div>
+                                <!-- 添加max_length字段（隐藏） -->
+                                <div class="mb-3 d-none">
+                                    <input type="hidden" name="max_length" value="{{ form.max_length.value|default_if_none:0 }}" id="id_max_length">
+                                </div>
+                            </div>
+
+                            <!-- 问题列表 -->
+                            <div class="form-section">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="mb-0">问题设置</h5>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" id="addQuestionBtn">
+                                        <i class="fas fa-plus me-1"></i>添加问题
+                                    </button>
+                                </div>
+
+                                <div id="questions-container">
+                                    {{ question_formset.management_form }}
+                                    {% for form in question_formset %}
+                                        <div class="question-item" data-question-index="{{ forloop.counter0 }}" data-question-id="{{ form.id.value|default_if_none:'' }}">
+                                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                                <h6 class="mb-0">问题 {{ forloop.counter }}</h6>
+                                                <div class="d-flex align-items-center">
+                                                    <!-- 如果有回答，显示版本提示 -->
+                                                    {% if form.instance.pk and form.instance.answer_items.count > 0 %}
+                                                        <span class="badge bg-warning me-2" title="此问题已有回答，修改将创建版本记录">
+                                                            <i class="fas fa-history me-1"></i> {{ form.instance.answer_set.count }} 个回答
+                                                        </span>
+                                                    {% endif %}
+                                                    <button type="button" class="btn btn-sm btn-outline-danger remove-question-btn">
+                                                        <i class="fas fa-times"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <!-- 问题内容 -->
+                                            <div class="mb-3">
+                                                <label class="form-label">问题内容 <span class="text-danger">*</span></label>
+                                                <input type="text"
+                                                       name="questions-{{ forloop.counter0 }}-text"
+                                                       class="form-control question-text"
+                                                       value="{{ form.text.value|default_if_none:'' }}"
+                                                       required>
+                                                <div class="question-error-message" style="display: none;"></div>
+                                            </div>
+
+                                            <!-- 问题类型和必填 -->
+                                            <div class="row mb-3">
+                                                <div class="col-md-6">
+                                                    <label class="form-label">问题类型</label>
+                                                    <select name="questions-{{ forloop.counter0 }}-question_type" class="form-select question-type">
+                                                        <option value="radio" {% if form.question_type.value == "radio" %}selected{% endif %}>单选题</option>
+                                                        <option value="checkbox" {% if form.question_type.value == "checkbox" %}selected{% endif %}>多选题</option>
+                                                        <option value="text" {% if form.question_type.value == "text" %}selected{% endif %}>简答题</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="form-check mt-4">
+                                                        <input type="checkbox"
+                                                               name="questions-{{ forloop.counter0 }}-required"
+                                                               class="form-check-input"
+                                                               {% if form.required.value %}checked{% endif %}>
+                                                        <label class="form-check-label">
+                                                            必填问题
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- 选项设置（单选/多选题） -->
+                                            <div class="mb-3 options-container" style="display: none;">
+                                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                                    <label class="form-label mb-0">选项设置 <span class="text-danger">*</span></label>
+                                                    <button type="button" class="btn btn-sm btn-outline-primary add-option-btn">
+                                                        <i class="fas fa-plus me-1"></i>添加选项
+                                                    </button>
+                                                </div>
+
+                                                <div class="options-list mb-3">
+                                                    <!-- 选项将在这里动态生成 -->
+                                                </div>
+
+                                                <!-- 隐藏的文本域用于存储选项 -->
+                                                <textarea name="questions-{{ forloop.counter0 }}-options_text"
+                                                          class="form-control options-textarea"
+                                                          style="display: none;">{{ form.options.value|default_if_none:'' }}</textarea>
+                                                <div class="options-error-message text-danger" style="display: none;">请至少添加一个选项</div>
+                                                <div class="form-text">
+                                                    每个选项自动编号为 A、B、C...
+                                                </div>
+                                            </div>
+
+                                            <!-- 字数限制（简答题） -->
+                                            <div class="mb-3 maxlength-container" style="display: none;">
+                                                <label class="form-label">字数限制</label>
+                                                <input type="number"
+                                                       name="questions-{{ forloop.counter0 }}-max_length_field"
+                                                       class="form-control max-length-input"
+                                                       value="{{ form.instance.max_length|default:'0' }}"
+                                                       min="0">
+                                                <div class="form-text">
+                                                    0表示不限制
+                                                </div>
+                                            </div>
+
+                                            <!-- 确保 id 字段有正确的 name 和 value -->
+                                            <input type="hidden" name="questions-{{ forloop.counter0 }}-id" value="{{ form.instance.pk|default:'' }}">
+                                            <input type="hidden" name="questions-{{ forloop.counter0 }}-order" value="{{ forloop.counter }}" class="question-order">
+                                            <input type="hidden" name="questions-{{ forloop.counter0 }}-DELETE" value="" class="delete-input">
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+
+                            <!-- 底部按钮区域 -->
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                                <!-- 放弃编辑 -->
+                                <a href="{% url 'dashboard_questionnaire_detail' questionnaire.id %}" class="btn btn-outline-danger me-2" id="cancelBtn">
+                                    <i class="fas fa-times me-1"></i>放弃编辑
+                                </a>
+
+                                <!-- 应该使用 name="save_action" -->
+                                <button type="submit" name="save_action" value="save_draft" class="btn btn-outline-primary me-2">
+                                    <i class="fas fa-save me-1"></i>暂时保存问卷
+                                </button>
+
+                                <button type="submit" name="save_action" value="save_and_publish" class="btn btn-primary" id="publishBtn">
+                                    <i class="fas fa-paper-plane me-1"></i>发布问卷
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 空的问题表单模板 -->
+    <template id="empty-form-template">
+        <div class="question-item" data-question-index="__prefix__">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0">新问题</h6>
+                <button type="button" class="btn btn-sm btn-outline-danger remove-question-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">问题内容 <span class="text-danger">*</span></label>
+                <input type="text" name="questions-__prefix__-text" class="form-control question-text" required>
+                <div class="question-error-message" style="display: none;"></div>
+            </div>
+
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label">问题类型</label>
+                    <select name="questions-__prefix__-question_type" class="form-select question-type">
+                        <option value="radio">单选题</option>
+                        <option value="checkbox">多选题</option>
+                        <option value="text">简答题</option>
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <div class="form-check mt-4">
+                        <input type="checkbox" name="questions-__prefix__-required" class="form-check-input" checked>
+                        <label class="form-check-label">必填问题</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 新问题的选项容器 -->
+            <div class="mb-3 options-container" style="display: none;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <label class="form-label mb-0">选项设置 <span class="text-danger">*</span></label>
+                    <button type="button" class="btn btn-sm btn-outline-primary add-option-btn">
+                        <i class="fas fa-plus me-1"></i>添加选项
+                    </button>
+                </div>
+
+                <div class="options-list mb-3">
+                    <!-- 选项将在这里动态生成 -->
+                </div>
+
+                <!-- 隐藏的文本域用于存储选项 -->
+                <textarea name="questions-__prefix__-options_text" class="form-control options-textarea" style="display: none;"></textarea>
+                <div class="options-error-message text-danger" style="display: none;">请至少添加一个选项</div>
+                <div class="form-text">
+                    每个选项自动编号为 A、B、C...
+                </div>
+            </div>
+
+            <!-- 新问题的字数限制容器 -->
+            <div class="mb-3 maxlength-container" style="display: none;">
+                <label class="form-label">字数限制</label>
+                <input type="number" name="questions-__prefix__-max_length_field"
+           class="form-control" value="0" min="0">
+                <div class="form-text">
+                    0表示不限制
+                </div>
+            </div>
+
+            <!-- 确保空表单也有ID字段（值为空） -->
+            <input type="hidden" name="questions-__prefix__-id" value="" id="">
+            <input type="hidden" name="questions-__prefix__-order" value="__order__" class="question-order">
+            <input type="hidden" name="questions-__prefix__-DELETE" value="" class="delete-input">
+        </div>
+    </template>
+
+    <!-- 选项模板 -->
+    <template id="option-template">
+        <div class="option-input-group">
+            <div class="input-group">
+                <span class="input-group-text option-letter">A</span>
+                <input type="text" class="form-control option-input" placeholder="请输入选项内容">
+                <button type="button" class="btn btn-outline-danger remove-option-btn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 检查问题是否有有效的选项
+        function hasValidOptions(questionItem) {
+            const optionsTextArea = questionItem.querySelector('.options-textarea');
+            if (!optionsTextArea) return false;
+
+            const optionsText = optionsTextArea.value.trim();
+            if (!optionsText) return false;
+
+            // 检查每行是否都有内容
+            const lines = optionsText.split('\n');
+            for (const line of lines) {
+                if (line.trim()) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        function debugOptions() {
+            console.log('=== 调试：检查所有问题的选项 ===');
+            document.querySelectorAll('.question-item').forEach((question, index) => {
+                const optionsTextArea = question.querySelector('.options-textarea');
+                const options = question.querySelectorAll('.option-input');
+                console.log(`问题${index+1}:`);
+                console.log('  - 选项文本:', optionsTextArea ? optionsTextArea.value : '无');
+                console.log('  - 可见选项:', Array.from(options).map(opt => opt.value));
+            });
+        }
+        window.debugOptions = debugOptions;
+    // 数字转字母（支持无限选项）
+    function numberToLetter(num) {
+        if (num < 26) {
+            return String.fromCharCode(65 + num);
+        } else {
+            const letter = String.fromCharCode(65 + (num % 26));
+            const number = Math.floor(num / 26);
+            return number > 0 ? `${letter}${number + 1}` : letter;
+        }
+    }
+
+    // 显示错误
+    function showError(element, message) {
+        element.classList.add('question-error');
+        const errorDiv = element.querySelector('.question-error-message');
+        if (errorDiv) {
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+    }
+
+    // 清除错误
+    function clearError(element) {
+        element.classList.remove('question-error');
+        const errorDiv = element.querySelector('.question-error-message');
+        if (errorDiv) {
+            errorDiv.style.display = 'none';
+        }
+    }
+
+    // 加载已有选项数据 - 关键修改：正确处理选项数据
+    function loadExistingOptions(questionItem) {
+        const optionsTextArea = questionItem.querySelector('.options-textarea');
+        if (!optionsTextArea) return;
+        let optionsText = optionsTextArea.value.trim();
+        console.log('选项文本内容:', optionsText);
+        // 如果文本区域是空的，检查是否有其他方式存储的选项
+        if (!optionsText) {
+        // 检查是否有 hidden 的 options 字段
+            const optionsInput = questionItem.querySelector('input[name$="-options"]');
+            if (optionsInput && optionsInput.value) {
+                optionsText = optionsInput.value;
+            }
+        }
+    
+    // 如果有选项文本，尝试解析
+    if (optionsText) {
+        const optionsList = questionItem.querySelector('.options-list');
+        
+        if (!optionsList) return;
+        
+        optionsList.innerHTML = '';
+        
+        // 尝试解析选项文本
+        let options = [];
+        
+        // 调试：打印原始值以了解格式
+        console.log('原始选项文本:', optionsText);
+        
+        // 尝试不同的解析方式
+        try {
+            // 方式1：如果是JSON格式
+            if (optionsText.startsWith('[') && optionsText.endsWith(']')) {
+                console.log('尝试解析为JSON格式');
+                try {
+                    const parsed = JSON.parse(optionsText);
+                    if (Array.isArray(parsed)) {
+                        options = parsed;
+                    } else if (typeof parsed === 'string') {
+                        // 如果是字符串形式的JSON数组，尝试再次解析
+                        const innerParsed = JSON.parse(parsed);
+                        if (Array.isArray(innerParsed)) {
+                            options = innerParsed;
+                        }
+                    }
+                } catch (e) {
+                    console.log('JSON解析失败，尝试其他格式');
+                }
+            }
+            
+            // 方式2：如果options是空的，尝试按逗号或换行分割
+            if (options.length === 0) {
+                if (optionsText.includes(',')) {
+                    console.log('按逗号分割');
+                    options = optionsText.split(',').map(opt => opt.trim()).filter(opt => opt);
+                } else if (optionsText.includes('\n')) {
+                    console.log('按换行分割');
+                    options = optionsText.split('\n').map(opt => opt.trim()).filter(opt => opt);
+                } else if (optionsText.trim()) {
+                    console.log('单个选项');
+                    options = [optionsText.trim()];
+                }
+            }
+            
+            // 方式3：尝试从Django表单的options字段获取
+            if (options.length === 0) {
+                // 查找可能是Django渲染的选项字段
+                const djangoOptions = questionItem.querySelector('[name$="-options"]');
+                if (djangoOptions && djangoOptions.value) {
+                    try {
+                        const parsed = JSON.parse(djangoOptions.value);
+                        if (Array.isArray(parsed)) {
+                            options = parsed;
+                        }
+                    } catch (e) {
+                        console.log('从Django字段解析失败');
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('解析选项失败:', e);
+        }
+        
+        console.log('解析后的选项:', options);
+        
+        // 添加选项到界面
+        options.forEach((optionText, index) => {
+            addOptionToQuestion(questionItem, optionText, index);
+        });
+        
+        // 如果有选项，确保选项文本区域更新
+        if (options.length > 0) {
+            setTimeout(() => {
+                updateOptionsText(questionItem);
+            }, 100);
+        }
+    } else {
+        console.log('无选项文本，可能该问题没有选项');
+    }
+}
+
+// 添加选项到问题
+function addOptionToQuestion(questionItem, optionText, index) {
+    const optionsContainer = questionItem.querySelector('.options-container');
+    if (!optionsContainer) return;
+    
+    const optionsList = optionsContainer.querySelector('.options-list');
+    if (!optionsList) return;
+    
+    const optionTemplate = document.getElementById('option-template');
+    if (!optionTemplate) return;
+    
+    const newOption = optionTemplate.content.cloneNode(true);
+    
+    const letterSpan = newOption.querySelector('.option-letter');
+    if (letterSpan) {
+        letterSpan.textContent = numberToLetter(index);
+    }
+    
+    const input = newOption.querySelector('.option-input');
+    if (input) {
+        // 解码HTML实体
+        let decodedText = optionText || '';
+        if (decodedText) {
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = decodedText;
+            decodedText = textarea.value;
+        }
+        input.value = decodedText || '';
+        input.addEventListener('input', function() {
+            updateOptionsText(questionItem);
+            // 清除选项错误
+            const errorDiv = optionsContainer.querySelector('.options-error-message');
+            if (errorDiv) {
+                errorDiv.style.display = 'none';
+            }
+        });
+    }
+    
+    const removeBtn = newOption.querySelector('.btn-outline-danger');
+    if (removeBtn) {
+        removeBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const optionGroup = this.closest('.option-input-group');
+            if (optionGroup) {
+                optionGroup.remove();
+                reorderOptions(questionItem);
+                updateOptionsText(questionItem);
+            }
+        });
+    }
+    
+    optionsList.appendChild(newOption);
+
+    // 在 addOption 函数中，修改选项输入框的事件处理
+    if (input) {
+    input.addEventListener('input', function() {
+        // 当用户开始输入时，清除错误状态
+        this.classList.remove('is-invalid');
+        updateOptionsText(questionItem);
+
+        // 清除选项错误
+        const errorDiv = optionsContainer.querySelector('.options-error-message');
+        if (errorDiv) {
+            errorDiv.style.display = 'none';
+        }
+    });
+}
+}
+    
+// 修改 addQuestionForm 函数，只添加一个空表单
+window.addQuestionForm = function() {
+    console.log('添加问题按钮被点击');
+    
+    const container = document.getElementById('questions-container');
+    const template = document.getElementById('empty-form-template');
+    const totalForms = document.getElementById('id_questions-TOTAL_FORMS');
+    
+    if (!template || !container || !totalForms) return;
+    
+    // 获取当前表单数量
+    const currentCount = parseInt(totalForms.value) || 0;
+    const newIndex = currentCount;
+    
+    // 创建新表单
+    const newFormHtml = template.innerHTML
+        .replace(/__prefix__/g, newIndex)
+        .replace(/__order__/g, (currentCount + 1));
+    
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = newFormHtml;
+    const newQuestion = tempDiv.firstElementChild;
+    
+    // 设置正确的索引
+    newQuestion.dataset.questionIndex = newIndex;
+    
+    // 添加到页面
+    container.appendChild(newQuestion);
+    
+    // 更新表单计数
+    totalForms.value = currentCount + 1;
+
+     const optionsTextArea = newQuestion.querySelector('.options-textarea');
+    if (optionsTextArea && !optionsTextArea.value) {
+        optionsTextArea.value = '';
+    }
+
+    // 确保max_length_field字段存在且为0
+    const maxLengthInput = newQuestion.querySelector('[name$="-max_length_field"]');
+    if (maxLengthInput && !maxLengthInput.value) {
+        maxLengthInput.value = '0';
+    }
+
+    // 确保DELETE字段为0
+    const deleteInput = newQuestion.querySelector('.delete-input');
+    if (deleteInput) deleteInput.value = '0';
+
+    // 初始化新问题的字段
+    updateQuestionFields(newQuestion);
+    setupQuestionEvents(newQuestion);
+    
+    // 确保DELETE为0
+    if (deleteInput) deleteInput.value = '0';
+    
+    // 更新问题序号
+    updateQuestionNumbers();
+    
+    console.log('成功添加问题，索引:', newIndex);
+};
+
+    // 设置问题事件
+    function setupQuestionEvents(questionItem) {
+        // 问题内容输入事件
+        const textInput = questionItem.querySelector('.question-text');
+        if (textInput) {
+            textInput.addEventListener('input', function() {
+                clearError(questionItem);
+            });
+        }
+
+        // 问题类型改变事件
+        const typeSelect = questionItem.querySelector('.question-type');
+        if (typeSelect) {
+            typeSelect.addEventListener('change', function() {
+                updateQuestionFields(questionItem);
+            });
+        }
+    }
+
+    // 更新问题字段显示状态 - 关键修改：编辑页面不自动添加选项
+    function updateQuestionFields(questionItem) {
+        if (!questionItem) return;
+
+        const select = questionItem.querySelector('select[name$="-question_type"]');
+        if (!select) return;
+
+        const optionsContainer = questionItem.querySelector('.options-container');
+        const maxlengthContainer = questionItem.querySelector('.maxlength-container');
+
+        const isChoice = select.value === 'radio' || select.value === 'checkbox';
+        const isText = select.value === 'text';
+
+        if (optionsContainer) {
+            optionsContainer.style.display = isChoice ? 'block' : 'none';
+            // 重要：编辑页面不自动添加空选项
+        }
+
+        if (maxlengthContainer) {
+            maxlengthContainer.style.display = isText ? 'block' : 'none';
+        }
+    }
+
+    // 添加选项
+    window.addOption = function(questionItem) {
+        if (!questionItem) return;
+
+        const optionsContainer = questionItem.querySelector('.options-container');
+        if (!optionsContainer) return;
+
+        const optionsList = optionsContainer.querySelector('.options-list');
+        if (!optionsList) return;
+
+        const optionCount = optionsList.querySelectorAll('.option-input-group').length;
+        const optionTemplate = document.getElementById('option-template');
+
+        if (!optionTemplate) return;
+
+        const newOption = optionTemplate.content.cloneNode(true);
+
+        const letterSpan = newOption.querySelector('.option-letter');
+        if (letterSpan) {
+            letterSpan.textContent = numberToLetter(optionCount);
+        }
+
+        const input = newOption.querySelector('.option-input');
+        if (input) {
+            input.placeholder = '请输入选项内容';
+            input.addEventListener('input', function() {
+                updateOptionsText(questionItem);
+                // 清除选项错误
+                const errorDiv = optionsContainer.querySelector('.options-error-message');
+                if (errorDiv) {
+                    errorDiv.style.display = 'none';
+                }
+            });
+        }
+
+        const removeBtn = newOption.querySelector('.btn-outline-danger');
+        if (removeBtn) {
+            removeBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const optionGroup = this.closest('.option-input-group');
+                if (optionGroup) {
+                    optionGroup.remove();
+                    reorderOptions(questionItem);
+                    updateOptionsText(questionItem);
+                }
+            });
+        }
+
+        optionsList.appendChild(newOption);
+        updateOptionsText(questionItem);
+    };
+    
+// 简化的 updateOptionsText 函数
+function updateOptionsText(questionItem) {
+    if (!questionItem) return;
+    
+    const optionsList = questionItem.querySelector('.options-list');
+    const optionsTextArea = questionItem.querySelector('.options-textarea');
+    
+    if (!optionsList || !optionsTextArea) return;
+    
+    // 收集选项
+    const options = [];
+    let hasEmptyOption = false;
+
+    optionsList.querySelectorAll('.option-input').forEach((input, index) => {
+        const value = input.value.trim();
+        if (value) {
+            options.push(value);
+        } else {
+            hasEmptyOption = true;
+            // 标记空的选项输入框
+            input.classList.add('is-invalid');
+        }
+    });
+    
+    // 保存为换行分隔的文本（Django期望的格式）
+    optionsTextArea.value = options.join('\n');
+
+     // 如果有空选项，显示错误
+    const errorDiv = questionItem.querySelector('.options-error-message');
+    if (errorDiv) {
+        if (hasEmptyOption) {
+            errorDiv.textContent = '选项内容不能为空';
+            errorDiv.style.display = 'block';
+        } else {
+            errorDiv.style.display = 'none';
+            // 清除所有选项输入框的错误状态
+            optionsList.querySelectorAll('.option-input').forEach(input => {
+                input.classList.remove('is-invalid');
+            });
+        }
+    }
+}
+
+    // 移除问题
+window.removeQuestion = function(questionItem) {
+    if (!questionItem) return;
+
+    const visibleQuestions = document.querySelectorAll('.question-item:not([style*="display: none"])');
+    if (visibleQuestions.length <= 1) {
+        alert('问卷至少需要一个问题！');
+        return;
+    }
+
+    const deleteInput = questionItem.querySelector('.delete-input');
+    const questionId = questionItem.querySelector('input[name$="-id"]')?.value;
+
+    if (deleteInput) {
+        // 如果是已有问题（有ID），标记为删除
+        // 如果是新问题（没有ID），直接移除DOM
+        if (questionId && questionId !== '') {
+            deleteInput.value = '1'; // 标记为删除
+            questionItem.style.display = 'none';
+        } else {
+            // 新问题，直接移除
+            questionItem.remove();
+            // 需要更新TOTAL_FORMS
+            const totalForms = document.getElementById('id_questions-TOTAL_FORMS');
+        }
+    }
+    updateQuestionNumbers();
+};
+
+    // 重新排序选项字母
+    function reorderOptions(questionItem) {
+        if (!questionItem) return;
+
+        const optionsList = questionItem.querySelector('.options-list');
+        if (!optionsList) return;
+
+        const optionGroups = optionsList.querySelectorAll('.option-input-group');
+        optionGroups.forEach((group, index) => {
+            const letterSpan = group.querySelector('.option-letter');
+            if (letterSpan) {
+                letterSpan.textContent = numberToLetter(index);
+            }
+        });
+    }
+
+    // 更新问题序号
+    function updateQuestionNumbers() {
+        const visibleQuestions = document.querySelectorAll('.question-item:not([style*="display: none"])');
+        visibleQuestions.forEach((question, index) => {
+            const title = question.querySelector('h6');
+            if (title) {
+                title.textContent = `问题 ${index + 1}`;
+            }
+
+            const orderInput = question.querySelector('.question-order');
+            if (orderInput) {
+                orderInput.value = index + 1;
+            }
+        });
+    }
+
+    // 验证表单
+    function validateForm() {
+        let isValid = true;
+        let errorMessage = '';
+
+        // 检查是否有可见的问题
+        const visibleQuestions = document.querySelectorAll('.question-item:not([style*="display: none"])');
+        if (visibleQuestions.length === 0) {
+            isValid = false;
+            errorMessage = '请至少添加一个问题！';
+            return { isValid, errorMessage };
+        }
+
+        // 检查每个问题
+        visibleQuestions.forEach((question, index) => {
+            const textInput = question.querySelector('[name$="-text"]');
+            if (!textInput || !textInput.value.trim()) {
+                isValid = false;
+                errorMessage = `问题 ${index + 1} 的内容不能为空`;
+                return;
+            }
+
+            const typeSelect = question.querySelector('[name$="-question_type"]');
+            if (typeSelect) {
+                const questionType = typeSelect.value;
+
+                // 检查选择题选项
+                if (questionType === 'radio' || questionType === 'checkbox') {
+                    const optionsContainer = question.querySelector('.options-container');
+                    if (optionsContainer && optionsContainer.style.display !== 'none') {
+                        const options = question.querySelectorAll('.option-input');
+                        let hasValidOption = false;
+
+                        options.forEach(option => {
+                            if (option.value.trim()) {
+                                hasValidOption = true;
+                            }
+                        });
+
+                        if (!hasValidOption) {
+                            isValid = false;
+                            errorMessage = `问题 ${index + 1} 需要至少一个选项`;
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+
+        return { isValid, errorMessage };
+    }
+function initStartTimeOption() {
+    const startOption = document.querySelector('.start-time-option');
+    const startInput = document.querySelector('.start-time-input');
+    if (!startOption || !startInput) return;
+
+    const updateStartTime = function() {
+        if (startOption.value === 'none') {
+            startInput.style.display = 'none';
+            // 清空输入框的值，确保提交空字符串
+            const timeInput = startInput.querySelector('input');
+            if (timeInput) timeInput.value = '';
+        } else {
+            startInput.style.display = 'block';
+        }
+    };
+
+    startOption.addEventListener('change', updateStartTime);
+    updateStartTime(); // 初始化
+}
+function initEndTimeOption() {
+    const endOption = document.querySelector('.end-time-option');
+    const endInput = document.querySelector('.end-time-input');
+    if (!endOption || !endInput) return;
+
+    const updateEndTime = function() {
+        if (endOption.value === 'none') {
+            endInput.style.display = 'none';
+            const timeInput = endInput.querySelector('input');
+            if (timeInput) timeInput.value = '';
+        } else {
+            endInput.style.display = 'block';
+        }
+    };
+
+    endOption.addEventListener('change', updateEndTime);
+    updateEndTime();
+}
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('编辑问卷页面加载完成');
+
+    // 1. 检查管理表单字段
+    let totalForms = document.getElementById('id_questions-TOTAL_FORMS');
+    
+    if (!totalForms) {
+        console.log('管理表单不存在，正在创建...');
+        const container = document.getElementById('questions-container');
+        if (container) {
+            const existingQuestions = container.querySelectorAll('.question-item');
+            const total = existingQuestions.length;
+            
+            if (total > 0) {
+                const managementDiv = document.createElement('div');
+                managementDiv.style.display = 'none';
+                managementDiv.innerHTML = `
+                    <input type="hidden" name="questions-TOTAL_FORMS" value="${total}" id="id_questions-TOTAL_FORMS">
+                    <input type="hidden" name="questions-INITIAL_FORMS" value="${total}">
+                    <input type="hidden" name="questions-MIN_NUM_FORMS" value="0">
+                    <input type="hidden" name="questions-MAX_NUM_FORMS" value="1000">
+                `;
+                container.prepend(managementDiv);
+                console.log('管理表单创建完成，总问题数:', total);
+            }
+        }
+    } else {
+        console.log('管理表单已存在，TOTAL_FORMS 值为:', totalForms.value);
+    }
+
+    // 2. 确保添加问题按钮的点击事件绑定正确
+    const addQuestionBtn = document.getElementById('addQuestionBtn');
+    if (addQuestionBtn) {
+        addQuestionBtn.onclick = function(e) {
+            e.preventDefault();
+            window.addQuestionForm();
+        };
+    }
+
+    // 3. 初始化所有问题（不再过滤）
+    const allQuestionElements = document.querySelectorAll('.question-item');
+    console.log(`DOM中找到 ${allQuestionElements.length} 个question-item元素`);
+    
+    // 初始化每个问题
+    allQuestionElements.forEach((questionItem, index) => {
+        console.log(`初始化问题 ${index + 1}`);
+        
+        // 先更新字段显示状态
+        updateQuestionFields(questionItem);
+        
+        // 然后加载已有选项
+        loadExistingOptions(questionItem);
+        
+        // 最后设置事件
+        setupQuestionEvents(questionItem);
+
+        // 检查问题的数据
+        const idInput = questionItem.querySelector('[name$="-id"]');
+        const textInput = questionItem.querySelector('[name$="-text"]');
+        const optionsTextArea = questionItem.querySelector('.options-textarea');
+        console.log('问题ID:', idInput ? idInput.value : '新问题');
+        console.log('问题文本:', textInput ? textInput.value : '无');
+        console.log('选项文本:', optionsTextArea ? optionsTextArea.value : '无');
+    });
+
+    // 4. 绑定事件委托
+    document.addEventListener('click', function(e) {
+        // 移除问题
+        if (e.target.closest('.remove-question-btn')) {
+            e.preventDefault();
+            const questionItem = e.target.closest('.question-item');
+            window.removeQuestion(questionItem);
+        }
+
+        // 添加选项
+        if (e.target.closest('.add-option-btn')) {
+            e.preventDefault();
+            const questionItem = e.target.closest('.question-item');
+            window.addOption(questionItem);
+        }
+    });
+
+    // 5. 问题类型改变事件
+    document.addEventListener('change', function(e) {
+        if (e.target.matches('.question-type')) {
+            const questionItem = e.target.closest('.question-item');
+            if (questionItem) {
+                updateQuestionFields(questionItem);
+            }
+        }
+    });
+
+    // 6. 放弃编辑确认
+    const cancelBtn = document.getElementById('cancelBtn');
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', function(e) {
+            if (!confirm('确定放弃编辑吗？未保存的更改将丢失。')) {
+                e.preventDefault();
+            }
+        });
+    }
+
+    // 7. 表单提交验证
+    const questionnaireForm = document.getElementById('questionnaireForm');
+    if (questionnaireForm) {
+        questionnaireForm.addEventListener('submit', function(e) {
+            console.log('表单提交验证开始');
+
+            document.querySelectorAll('.question-item').forEach(questionItem => {
+                const isVisible = questionItem.style.display !== 'none';
+                if (isVisible) {
+                    updateOptionsText(questionItem);
+                }
+            });
+
+            // 检查文本
+            const textInput = question.querySelector('[name$="-text"]');
+            console.log('文本:', textInput ? textInput.value : '无');
+
+            // 检查问题类型
+            const typeSelect = question.querySelector('[name$="-question_type"]');
+            console.log('类型:', typeSelect ? typeSelect.value : '无');
+
+            // 检查选项
+            const optionsTextArea = question.querySelector('.options-textarea');
+            console.log('选项文本:', optionsTextArea ? optionsTextArea.value : '无');
+
+
+            // 检查max_length_field
+            const maxLengthInput = question.querySelector('[name$="-max_length_field"]');
+            console.log('字数限制:', maxLengthInput ? maxLengthInput.value : '无');
+
+            // 检查ID
+            const idInput = question.querySelector('[name$="-id"]');
+            console.log('ID:', idInput ? idInput.value : '无（新问题）');
+
+            // 检查是否有可见的问题
+            const visibleQuestions = document.querySelectorAll('.question-item:not([style*="display: none"])');
+            
+            if (visibleQuestions.length === 0) {
+                e.preventDefault();
+                alert('请至少添加一个问题！');
+                return;
+            }
+
+            let isValid = true;
+            let errorMessage = '';
+            
+            visibleQuestions.forEach((question, index) => {
+                const textInput = question.querySelector('[name$="-text"]');
+                if (!textInput || !textInput.value.trim()) {
+                    isValid = false;
+                    errorMessage = `问题 ${index + 1} 的内容不能为空`;
+                    return;
+                }
+                
+                const typeSelect = question.querySelector('[name$="-question_type"]');
+                if (typeSelect && (typeSelect.value === 'radio' || typeSelect.value === 'checkbox')) {
+                    const optionsTextArea = question.querySelector('.options-textarea');
+                    if (!optionsTextArea || !optionsTextArea.value.trim()) {
+                        isValid = false;
+                        errorMessage = `问题 ${index + 1} 需要至少一个选项`;
+                        return;
+                    }
+                    // 检查每个选项是否都有内容
+                    const optionsList = question.querySelectorAll('.option-input');
+                    let hasEmptyOption = false;
+                    optionsList.forEach((input, optIndex) => {
+                        if (!input.value.trim()) {
+                            hasEmptyOption = true;
+                            input.classList.add('is-invalid');
+                            isValid = false;
+                            errorMessage = `问题 ${index + 1} 的第 ${optIndex + 1} 个选项不能为空`;
+                    }
+                });
+
+                if (hasEmptyOption) {
+                    // 显示选项错误
+                    const errorDiv = question.querySelector('.options-error-message');
+                    if (errorDiv) {
+                        errorDiv.textContent = '选项内容不能为空';
+                        errorDiv.style.display = 'block';
+                    }
+                    return;
+                }
+                }
+            });
+            
+            if (!isValid) {
+                e.preventDefault();
+                alert(errorMessage);
+            } else {
+                console.log('表单验证通过');
+            }
+        });
+    }
+
+    // 8. 更新问题序号
+    updateQuestionNumbers();
+    initStartTimeOption();
+    initEndTimeOption();
+    console.log('编辑页面初始化完成');
+});
+
+// 检查问题是否有回答的提示
+function checkQuestionVersions() {
+    document.querySelectorAll('.question-item').forEach(item => {
+        const questionId = item.dataset.questionId;
+        const answerBadge = item.querySelector('.badge.bg-warning');
+        
+        if (answerBadge && questionId) {
+            // 这个问题有回答，可以添加特殊处理
+            const textInput = item.querySelector('.question-text');
+            if (textInput) {
+                textInput.addEventListener('focus', function() {
+                    // 可以显示一个浮动提示
+                    showVersionWarning(this);
+                });
+            }
+        }
+    });
+}
+
+function showVersionWarning(input) {
+    // 创建一个警告提示
+    const warningDiv = document.createElement('div');
+    warningDiv.className = 'alert alert-warning alert-dismissible fade show mt-2';
+    warningDiv.innerHTML = `
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        <strong>注意：</strong>此问题已有回答记录，修改将创建新的版本快照。
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    // 插入到输入框后面
+    input.parentNode.insertBefore(warningDiv, input.nextSibling);
+}
+
+// 在页面加载完成后调用
+document.addEventListener('DOMContentLoaded', function() {
+    checkQuestionVersions();
+});
+// 控制最大提交份数输入框的显示/隐藏
+const limitCheckbox = document.querySelector('[name="limit_responses"]');
+const maxField = document.getElementById('maxResponsesField');
+
+function toggleMaxField() {
+    if (maxField) {
+        maxField.style.display = limitCheckbox && limitCheckbox.checked ? 'block' : 'none';
+    }
+}
+if (limitCheckbox) {
+    limitCheckbox.addEventListener('change', toggleMaxField);
+    toggleMaxField(); // 初始化
+}
+
+    </script>
+</body>
+</html>

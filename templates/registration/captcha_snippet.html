@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>验证码片段</title>
+</head>
+<body>
+<div class="mb-3">
+    <label class="form-label">验证码</label>
+    <div class="d-flex align-items-center">
+        <!-- 验证码图片 -->
+        <img src="{% url 'captcha_image' %}"
+             id="captcha-img"
+             class="border rounded"
+             alt="验证码"
+             style="cursor: pointer; height: 40px;"
+             onclick="refreshCaptcha()"
+             title="点击刷新验证码">
+
+        <!-- 验证码输入框 -->
+        <input type="text" name="captcha"
+               id="id_captcha"
+               class="form-control ms-2"
+               placeholder="请输入验证码"
+               maxlength="6"
+               required
+               autocomplete="off">
+
+        <!-- 刷新按钮 -->
+        <button type="button" class="btn btn-outline-secondary ms-2"
+                onclick="refreshCaptcha()" title="刷新验证码">
+            ↻
+        </button>
+    </div>
+    <small class="text-muted">请输入图片中的字符（不区分大小写）</small>
+</div>
+
+<!-- 通用的刷新脚本 -->
+<script>
+function refreshCaptcha() {
+    const captchaImg = document.getElementById('captcha-img');
+    const captchaInput = document.getElementById('id_captcha');
+
+    if (captchaInput) captchaInput.value = '';
+
+    // 添加时间戳防止缓存
+    const timestamp = new Date().getTime();
+
+    // 使用AJAX刷新
+    fetch('{% url "captcha_refresh" %}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && captchaImg) {
+                captchaImg.src = '{% url "captcha_image" %}?t=' + timestamp;
+            }
+        })
+        .catch(error => {
+            console.log('刷新失败，使用直接刷新方式');
+            if (captchaImg) {
+                captchaImg.src = captchaImg.src.split('?')[0] + '?t=' + timestamp;
+            }
+        });
+}
+
+// 页面加载时，如果有验证码错误，自动刷新
+document.addEventListener('DOMContentLoaded', function() {
+    const errorAlerts = document.querySelectorAll('.alert-danger');
+    if (errorAlerts.length > 0) {
+        setTimeout(refreshCaptcha, 300);
+    }
+});
+</script>
+</body>
+</html>

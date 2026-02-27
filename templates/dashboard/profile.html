@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人资料 - 问卷系统</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .card-header {
+            border-bottom: 1px solid rgba(0,0,0,0.125);
+        }
+        
+        .border-3 {
+            border-width: 3px !important;
+        }
+        
+        .form-label {
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        input[readonly] {
+            background-color: #f8f9fa;
+            cursor: not-allowed;
+        }
+        
+        .breadcrumb {
+            background-color: transparent;
+            padding: 0;
+            margin-bottom: 1rem;
+        }
+        
+        .breadcrumb-item.active {
+            color: #6c757d;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        }
+        
+        .container {
+            max-width: 1200px;
+        }
+        
+        .card {
+            border-radius: 0.5rem;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .alert {
+            border-radius: 0.375rem;
+            border: none;
+        }
+        
+        .btn-primary {
+            background-color: #4e73df;
+            border-color: #4e73df;
+        }
+        
+        .btn-primary:hover {
+            background-color: #3a5ec2;
+            border-color: #3a5ec2;
+        }
+        
+        .btn-primary:disabled {
+            background-color: #6c757d;
+            border-color: #6c757d;
+            opacity: 0.65;
+        }
+        
+        .btn-outline-secondary {
+            color: #6c757d;
+            border-color: #dee2e6;
+        }
+        
+        .btn-outline-secondary:hover {
+            background-color: #f8f9fa;
+            color: #6c757d;
+        }
+        
+        .stats-card {
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        
+        .stats-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .recommendation {
+            background-color: #f8f9fa;
+            border-radius: 0.25rem;
+            padding: 0.5rem;
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+            display: none;
+        }
+        
+        .recommendation .badge {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .recommendation .badge:hover {
+            background-color: #4e73df !important;
+        }
+        
+        .input-group .form-control.is-valid {
+            border-color: #198754;
+        }
+        
+        .input-group .form-control.is-invalid {
+            border-color: #dc3545;
+        }
+        
+        .save-button-container {
+            display: none;
+        }
+        
+        .save-button-container.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+        <div class="container">
+            <a class="navbar-brand" href="{% url 'dashboard' %}">
+                <i class="fas fa-poll me-2"></i>
+                <strong>问卷系统</strong>
+            </a>
+
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+                           href="{% url 'dashboard' %}">
+                            <i class="fas fa-tachometer-alt me-1"></i>仪表盘
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'questionnaire' in request.resolver_match.url_name %}active{% endif %}"
+                           href="{% url 'questionnaire_list' %}">
+                            <i class="fas fa-list me-1"></i>我的问卷
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'my_responses' %}active{% endif %}"
+                           href="{% url 'my_responses' %}">
+                            <i class="fas fa-history me-1"></i>我的回答
+                        </a>
+                    </li>
+                    {% if user.is_admin %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'manage_users' %}active{% endif %}"
+                           href="{% url 'manage_users' %}">
+                            <i class="fas fa-users me-1"></i>用户管理
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'admin_statistics' %}active{% endif %}"
+                           href="{% url 'admin_statistics' %}">
+                            <i class="fas fa-chart-bar me-1"></i>系统统计
+                        </a>
+                    </li>
+                    {% endif %}
+                </ul>
+
+                <ul class="navbar-nav">
+                    <!-- 用户下拉菜单 -->
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button"
+                           data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle me-1"></i>{{ user.username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li>
+                                <a class="dropdown-item" href="{% url 'user_profile' %}">
+                                    <i class="fas fa-user me-2"></i>个人资料
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="{% url 'my_responses' %}">
+                                    <i class="fas fa-history me-2"></i>我的回答
+                                </a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="{% url 'notification_list' %}">
+                                    <i class="fas fa-bell me-2"></i>消息通知
+                                    {% if unread_notifications_count > 0 %}
+                                        <span class="badge bg-danger float-end">{{ unread_notifications_count }}</span>
+                                    {% endif %}
+                                </a>
+                            </li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li>
+                                <a class="dropdown-item text-danger" href="{% url 'logout' %}">
+                                    <i class="fas fa-sign-out-alt me-2"></i>退出登录
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主要内容 -->
+    <div class="container py-4">
+        <div class="row justify-content-center">
+            <div class="col-md-8 col-lg-6">
+                <!-- 面包屑导航 -->
+                <nav aria-label="breadcrumb" class="mb-4">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">个人资料</li>
+                    </ol>
+                </nav>
+
+                <!-- 页面标题 -->
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2 class="mb-0">
+                        <i class="fas fa-user-circle text-primary me-2"></i>个人资料
+                    </h2>
+                </div>
+
+                <!-- 消息提示 -->
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+
+                <!-- 资料卡片 -->
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-user-edit me-2"></i>基本信息
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="post" action="{% url 'user_profile' %}" id="profileForm">
+                            {% csrf_token %}
+                            
+                            <div class="row">
+                                <!-- 用户名（可编辑） -->
+                                <div class="col-md-6 mb-3">
+                                    <label for="username" class="form-label">用户名 *</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="username" name="username" 
+                                               value="{{ user.username }}" required>
+                                        <button class="btn btn-outline-secondary" type="button" id="checkUsernameBtn">
+                                            <i class="fas fa-check"></i>
+                                        </button>
+                                    </div>
+                                    <div class="recommendation" id="usernameRecommendation">
+                                        <small class="text-muted">推荐用户名：</small>
+                                    </div>
+                                    <div id="usernameFeedback" class="valid-feedback" style="display: none;">
+                                        用户名可用
+                                    </div>
+                                    <div id="usernameError" class="invalid-feedback" style="display: none;">
+                                        用户名已被使用
+                                    </div>
+                                    <small class="text-muted">用户名长度至少3个字符</small>
+                                </div>
+                                
+                                <!-- 用户类型 -->
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">用户类型</label>
+                                    <input type="text" class="form-control" 
+                                           value="{% if user.is_admin %}管理员{% else %}普通用户{% endif %}" readonly>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <!-- 姓 -->
+                                <div class="col-md-6 mb-3">
+                                    <label for="last_name" class="form-label">姓</label>
+                                    <input type="text" class="form-control" id="last_name" name="last_name" 
+                                           value="{{ user.last_name }}">
+                                </div>
+                                
+                                <!-- 名 -->
+                                <div class="col-md-6 mb-3">
+                                    <label for="first_name" class="form-label">名</label>
+                                    <input type="text" class="form-control" id="first_name" name="first_name" 
+                                           value="{{ user.first_name }}">
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <!-- 手机号 -->
+                                <div class="col-md-12 mb-3">
+                                    <label for="phone" class="form-label">手机号码</label>
+                                    <input type="tel" class="form-control" id="phone" name="phone" 
+                                           value="{{ user.phone|default:'' }}" pattern="[0-9]{11}">
+                                    <small class="text-muted">请填写11位手机号码（可选）</small>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <!-- 注册时间 -->
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">注册时间</label>
+                                    <input type="text" class="form-control" 
+                                           value="{{ user.date_joined|date:'Y年m月d日 H:i' }}" readonly>
+                                </div>
+                                
+                                <!-- 最后登录时间 -->
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">最后登录时间</label>
+                                    <input type="text" class="form-control" 
+                                           value="{% if user.last_login %}{{ user.last_login|date:'Y年m月d日 H:i' }}{% else %}从未登录{% endif %}" readonly>
+                                </div>
+                            </div>
+                            
+                            <!-- 保存按钮容器 -->
+                            <div class="save-button-container mt-4" id="saveButtonContainer">
+                                <button type="submit" class="btn btn-primary px-4" id="submitBtn" disabled>
+                                    <i class="fas fa-save me-2"></i>保存更改
+                                </button>
+                                <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary ms-2">
+                                    <i class="fas fa-times me-2"></i>取消
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                
+                <!-- 账号统计 -->
+                <div class="row">
+                    <!-- 创建的问卷 - 链接到我的问卷 -->
+                    <div class="col-md-4 mb-3">
+                        <a href="{% url 'questionnaire_list' %}" class="text-decoration-none">
+                            <div class="card border-start border-primary border-3 h-100 stats-card">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center">
+                                        <div class="flex-shrink-0">
+                                            <i class="fas fa-file-alt fa-2x text-primary"></i>
+                                        </div>
+                                        <div class="flex-grow-1 ms-3">
+                                            <h5 class="mb-0">{{ user.created_questionnaires.count }}</h5>
+                                            <small class="text-muted">创建的问卷</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    
+                    <!-- 参与的问卷 - 链接到我的回答 -->
+                    <div class="col-md-4 mb-3">
+                        <a href="{% url 'my_responses' %}" class="text-decoration-none">
+                            <div class="card border-start border-success border-3 h-100 stats-card">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center">
+                                        <div class="flex-shrink-0">
+                                            <i class="fas fa-check-circle fa-2x text-success"></i>
+                                        </div>
+                                        <div class="flex-grow-1 ms-3">
+                                            <h5 class="mb-0">{{ user.responses.count }}</h5>
+                                            <small class="text-muted">参与的问卷</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                    
+                    <!-- 未读通知 - 链接到通知列表 -->
+                    <div class="col-md-4 mb-3">
+                        <a href="{% url 'notification_list' %}" class="text-decoration-none">
+                            <div class="card border-start border-info border-3 h-100 stats-card">
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center">
+                                        <div class="flex-shrink-0">
+                                            <i class="fas fa-bell fa-2x text-info"></i>
+                                        </div>
+                                        <div class="flex-grow-1 ms-3">
+                                            <h5 class="mb-0">{{ unread_notifications_count }}</h5>
+                                            <small class="text-muted">未读通知</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const usernameInput = document.getElementById('username');
+        const checkUsernameBtn = document.getElementById('checkUsernameBtn');
+        const usernameFeedback = document.getElementById('usernameFeedback');
+        const usernameError = document.getElementById('usernameError');
+        const usernameRecommendation = document.getElementById('usernameRecommendation');
+        const submitBtn = document.getElementById('submitBtn');
+        const saveButtonContainer = document.getElementById('saveButtonContainer');
+        const form = document.getElementById('profileForm');
+        const phoneInput = document.getElementById('phone');
+        const firstNameInput = document.getElementById('first_name');
+        const lastNameInput = document.getElementById('last_name');
+        
+        // 存储初始值
+        let initialValues = {
+            username: '{{ user.username }}',
+            first_name: '{{ user.first_name|default:"" }}',
+            last_name: '{{ user.last_name|default:"" }}',
+            phone: '{{ user.phone|default:"" }}'
+        };
+        
+        let usernameIsAvailable = true;
+        
+        // 检查表单是否有更改
+        function checkForChanges() {
+            const currentValues = {
+                username: usernameInput.value.trim(),
+                first_name: firstNameInput.value.trim(),
+                last_name: lastNameInput.value.trim(),
+                phone: phoneInput.value.trim()
+            };
+            
+            let hasChanges = false;
+            
+            // 检查每个字段是否有更改
+            for (const key in currentValues) {
+                if (currentValues[key] !== initialValues[key]) {
+                    hasChanges = true;
+                    break;
+                }
+            }
+            
+            // 如果用户名已存在，即使有更改也不能提交
+            if (hasChanges && usernameInput.value.trim() !== '{{ user.username }}' && !usernameIsAvailable) {
+                hasChanges = false;
+            }
+            
+            return hasChanges;
+        }
+        
+        // 更新保存按钮状态
+        function updateSaveButton() {
+            const hasChanges = checkForChanges();
+            
+            if (hasChanges) {
+                saveButtonContainer.classList.add('show');
+                submitBtn.disabled = false;
+            } else {
+                saveButtonContainer.classList.remove('show');
+                submitBtn.disabled = true;
+            }
+        }
+        
+        // 检查用户名是否可用
+        function checkUsernameAvailability(username) {
+            if (!username || username === '{{ user.username }}') {
+                return Promise.resolve({ available: true, message: '这是您当前使用的用户名' });
+            }
+            
+            return fetch(`/profile/check-username/?username=${encodeURIComponent(username)}`)
+                .then(response => response.json())
+                .catch(error => {
+                    console.error('检查用户名失败:', error);
+                    return { available: false, message: '检查失败，请重试' };
+                });
+        }
+        
+        // 用户名输入监听
+        usernameInput.addEventListener('input', function() {
+            const username = this.value.trim();
+            
+            if (username === '{{ user.username }}') {
+                usernameInput.classList.remove('is-invalid', 'is-valid');
+                usernameFeedback.style.display = 'none';
+                usernameError.style.display = 'none';
+                usernameRecommendation.style.display = 'none';
+                usernameIsAvailable = true;
+                updateSaveButton();
+                return;
+            }
+            
+            if (username.length < 3) {
+                usernameInput.classList.add('is-invalid');
+                usernameInput.classList.remove('is-valid');
+                usernameFeedback.style.display = 'none';
+                usernameError.style.display = 'block';
+                usernameError.textContent = '用户名长度不能少于3个字符';
+                usernameRecommendation.style.display = 'none';
+                usernameIsAvailable = false;
+                updateSaveButton();
+                return;
+            }
+            
+            // 检查用户名
+            checkUsernameAvailability(username).then(data => {
+                if (data.available) {
+                    usernameInput.classList.remove('is-invalid');
+                    usernameInput.classList.add('is-valid');
+                    usernameFeedback.style.display = 'block';
+                    usernameError.style.display = 'none';
+                    usernameRecommendation.style.display = 'none';
+                    usernameIsAvailable = true;
+                } else {
+                    usernameInput.classList.add('is-invalid');
+                    usernameInput.classList.remove('is-valid');
+                    usernameFeedback.style.display = 'none';
+                    usernameError.style.display = 'block';
+                    usernameError.textContent = data.message;
+                    
+                    // 显示推荐用户名
+                    if (data.recommendations && data.recommendations.length > 0) {
+                        usernameRecommendation.innerHTML = '<small class="text-muted">推荐用户名：</small>';
+                        data.recommendations.forEach(rec => {
+                            const badge = document.createElement('span');
+                            badge.className = 'badge bg-primary me-1';
+                            badge.textContent = rec;
+                            badge.style.cursor = 'pointer';
+                            badge.onclick = function() {
+                                usernameInput.value = rec;
+                                usernameInput.dispatchEvent(new Event('input'));
+                            };
+                            usernameRecommendation.appendChild(badge);
+                        });
+                        usernameRecommendation.style.display = 'block';
+                    } else {
+                        usernameRecommendation.style.display = 'none';
+                    }
+                    usernameIsAvailable = false;
+                }
+                updateSaveButton();
+            });
+        });
+        
+        // 其他字段输入监听
+        [phoneInput, firstNameInput, lastNameInput].forEach(input => {
+            input.addEventListener('input', updateSaveButton);
+        });
+        
+        // 手动检查用户名按钮
+        checkUsernameBtn.addEventListener('click', function() {
+            const username = usernameInput.value.trim();
+            
+            if (!username) {
+                alert('请输入用户名');
+                usernameInput.focus();
+                return;
+            }
+            
+            if (username === '{{ user.username }}') {
+                alert('这是您当前使用的用户名');
+                return;
+            }
+            
+            if (username.length < 3) {
+                alert('用户名长度不能少于3个字符');
+                usernameInput.focus();
+                return;
+            }
+            
+            const originalHtml = checkUsernameBtn.innerHTML;
+            checkUsernameBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            
+            checkUsernameAvailability(username).then(data => {
+                if (data.available) {
+                    alert(`用户名 "${username}" 可用！`);
+                } else {
+                    alert(`用户名 "${username}" 已被使用。${data.recommendations ? ' 推荐：' + data.recommendations.join(', ') : ''}`);
+                }
+                checkUsernameBtn.innerHTML = originalHtml;
+                
+                // 触发输入事件以更新UI
+                usernameInput.dispatchEvent(new Event('input'));
+            });
+        });
+        
+        // 表单提交验证
+        form.addEventListener('submit', function(event) {
+            // 验证手机号格式（如果填写）
+            if (phoneInput.value.trim() !== '') {
+                const phonePattern = /^[0-9]{11}$/;
+                if (!phonePattern.test(phoneInput.value.trim())) {
+                    event.preventDefault();
+                    alert('请填写正确的11位手机号码');
+                    phoneInput.focus();
+                    return false;
+                }
+            }
+            
+            // 验证用户名
+            const username = usernameInput.value.trim();
+            if (username.length < 3) {
+                event.preventDefault();
+                alert('用户名长度不能少于3个字符');
+                usernameInput.focus();
+                return false;
+            }
+            
+            // 如果用户名改变了，检查是否可用
+            if (username !== '{{ user.username }}' && !usernameIsAvailable) {
+                event.preventDefault();
+                alert('请确保用户名可用后再提交');
+                usernameInput.focus();
+                return false;
+            }
+            
+            return true;
+        });
+        
+        // 自动关闭消息提示
+        setTimeout(function() {
+            const alerts = document.querySelectorAll('.alert');
+            alerts.forEach(function(alert) {
+                const bsAlert = new bootstrap.Alert(alert);
+                bsAlert.close();
+            });
+        }, 5000);
+        
+        // 手机号输入限制
+        phoneInput.addEventListener('input', function() {
+            this.value = this.value.replace(/\D/g, '').slice(0, 11);
+        });
+        
+        // 初始化保存按钮状态
+        updateSaveButton();
+    });
+    </script>
+</body>
+</html>

@@ -1,0 +1,194 @@
+{% extends 'notification/base.html' %}
+
+{% block title %}{{ notification.title }} - 通知详情{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <!-- 面包屑导航 -->
+        <nav aria-label="breadcrumb" class="mb-4">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'notification_list' %}">通知列表</a></li>
+                <li class="breadcrumb-item active">通知详情</li>
+            </ol>
+        </nav>
+        
+        <!-- 通知详情卡片 -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h4 class="mb-0">{{ notification.title }}</h4>
+                    </div>
+                    <div>
+                        <span class="badge 
+                            {% if notification.notification_type == 'questionnaire_update' %}bg-info
+                            {% elif notification.notification_type == 'admin' %}bg-danger
+                            {% elif notification.notification_type == 'system' %}bg-primary
+                            {% else %}bg-secondary{% endif %} me-2">
+                            {{ notification.get_notification_type_display }}
+                        </span>
+                        <span class="badge 
+                            {% if notification.priority == 'urgent' %}bg-danger
+                            {% elif notification.priority == 'high' %}bg-warning
+                            {% elif notification.priority == 'low' %}bg-secondary
+                            {% else %}bg-success{% endif %}">
+                            {{ notification.get_priority_display }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card-body">
+                <!-- 通知内容 -->
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3">通知内容</h6>
+                    <div class="p-4 bg-light rounded">
+                        {{ notification.message|linebreaks }}
+                    </div>
+                </div>
+                
+                <!-- 相关问卷信息（如果有） -->
+                {% if notification.related_questionnaire %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-3">相关问卷</h6>
+                    <div class="card border-primary">
+                        <div class="card-body">
+                            <h5 class="card-title">{{ notification.related_questionnaire.title }}</h5>
+                            <p class="card-text text-muted">
+                                {{ notification.related_questionnaire.description|truncatechars:200 }}
+                            </p>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <span class="badge bg-secondary me-2">
+                                        状态: {{ notification.related_questionnaire.get_status_display }}
+                                    </span>
+                                    <span class="badge bg-info">
+                                        版本: {{ notification.related_questionnaire.version }}
+                                    </span>
+                                </div>
+                                <div>
+                                    <a href="{% url 'questionnaire_detail' notification.related_questionnaire.id %}" 
+                                       class="btn btn-sm btn-primary">
+                                        <i class="fas fa-external-link-alt me-1"></i>查看问卷
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <!-- 通知元数据 -->
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6 class="card-title text-muted mb-3">
+                                    <i class="fas fa-info-circle me-2"></i>通知信息
+                                </h6>
+                                <ul class="list-unstyled">
+                                    <li class="mb-2">
+                                        <strong>发送时间:</strong>
+                                        <span class="text-muted ms-2">
+                                            {{ notification.created_at|date:"Y年m月d日 H:i:s" }}
+                                        </span>
+                                    </li>
+                                    <li class="mb-2">
+                                        <strong>发送状态:</strong>
+                                        <span class="badge 
+                                            {% if notification.delivery_status == 'sent' %}bg-success
+                                            {% elif notification.delivery_status == 'pending' %}bg-warning
+                                            {% elif notification.delivery_status == 'failed' %}bg-danger
+                                            {% else %}bg-info{% endif %} ms-2">
+                                            {{ notification.get_delivery_status_display }}
+                                        </span>
+                                    </li>
+                                    {% if notification.sent_at %}
+                                    <li class="mb-2">
+                                        <strong>实际发送:</strong>
+                                        <span class="text-muted ms-2">
+                                            {{ notification.sent_at|date:"Y年m月d日 H:i:s" }}
+                                        </span>
+                                    </li>
+                                    {% endif %}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-body">
+                                <h6 class="card-title text-muted mb-3">
+                                    <i class="fas fa-user me-2"></i>接收信息
+                                </h6>
+                                <ul class="list-unstyled">
+                                    <li class="mb-2">
+                                        <strong>接收用户:</strong>
+                                        <span class="text-muted ms-2">
+                                            {{ notification.user.username }}
+                                        </span>
+                                    </li>
+                                    <li class="mb-2">
+                                        <strong>阅读状态:</strong>
+                                        {% if notification.is_read %}
+                                            <span class="badge bg-success ms-2">已读</span>
+                                        {% else %}
+                                            <span class="badge bg-warning ms-2">未读</span>
+                                        {% endif %}
+                                    </li>
+                                    {% if notification.is_read and notification.read_at %}
+                                    <li class="mb-2">
+                                        <strong>阅读时间:</strong>
+                                        <span class="text-muted ms-2">
+                                            {{ notification.read_at|date:"Y年m月d日 H:i:s" }}
+                                        </span>
+                                    </li>
+                                    {% endif %}
+                                    <li class="mb-2">
+                                        <strong>接收时间:</strong>
+                                        <span class="text-muted ms-2">
+                                            {{ notification.time_since }}
+                                        </span>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card-footer bg-white">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <a href="{% url 'notification_list' %}" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left me-1"></i>返回列表
+                        </a>
+                    </div>
+                    <div>
+                        {% if not notification.is_read %}
+                        <form action="{% url 'mark_all_read' %}" method="POST" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="notification_id" value="{{ notification.id }}">
+                            <button type="submit" class="btn btn-success me-2">
+                                <i class="fas fa-check me-1"></i>标记为已读
+                            </button>
+                        </form>
+                        {% endif %}
+                        
+                        <form action="{% url 'delete_notification' notification.id %}" 
+                              method="POST" class="d-inline"
+                              onsubmit="return confirm('确定要删除这条通知吗？');">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-danger">
+                                <i class="fas fa-trash me-1"></i>删除通知
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,598 @@
+<!-- questionnaire/templates/questionnaire/editor.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - 问卷调查系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .question-card {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background: #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.3s;
+        }
+        .question-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        .question-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .option-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .option-item:hover {
+            background: #e9ecef;
+        }
+        .question-type-badge {
+            font-size: 0.8em;
+            padding: 3px 8px;
+            border-radius: 12px;
+        }
+        .question-number {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            text-align: center;
+            background: #007bff;
+            color: white;
+            border-radius: 50%;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+        .sortable-handle {
+            cursor: move;
+            color: #6c757d;
+            margin-right: 10px;
+        }
+        .action-buttons {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            padding: 15px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .preview-section {
+            border: 1px dashed #007bff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            background: #f8f9fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 侧边栏 -->
+            <div class="col-md-3 col-lg-2 bg-light min-vh-100">
+                <div class="p-3">
+                    <h5><i class="fas fa-edit me-2"></i>问卷编辑器</h5>
+                    <div class="mt-4">
+                        <h6>问题类型</h6>
+                        <div class="list-group">
+                            {% for value, label in question_types %}
+                            <button type="button" class="list-group-item list-group-item-action add-question-btn" data-type="{{ value }}">
+                                <i class="fas fa-plus me-2"></i>{{ label }}
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <h6>设置</h6>
+                        <div class="list-group">
+                            <a href="#basic-settings" class="list-group-item list-group-item-action" data-bs-toggle="collapse">
+                                <i class="fas fa-cog me-2"></i>基础设置
+                            </a>
+                            <div class="collapse show" id="basic-settings">
+                                <div class="p-2">
+                                    <div class="form-check mb-2">
+                                        <input type="checkbox" class="form-check-input" id="require-login" name="require_login" {% if questionnaire and questionnaire.require_login %}checked{% endif %}>
+                                        <label class="form-check-label" for="require-login">需要登录</label>
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input type="checkbox" class="form-check-input" id="is-public" name="is_public" {% if questionnaire and questionnaire.is_public %}checked{% endif %}>
+                                        <label class="form-check-label" for="is-public">公开访问</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 主编辑区 -->
+            <div class="col-md-9 col-lg-10">
+                <div class="p-4">
+                    <!-- 问卷标题和描述 -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="fas fa-file-alt me-2"></i>问卷信息</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">问卷标题</label>
+                                <input type="text" class="form-control form-control-lg" name="title"
+                                       value="{{ questionnaire.title|default_if_none:'' }}"
+                                       placeholder="请输入问卷标题" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">问卷描述</label>
+                                <textarea class="form-control" name="description" rows="3"
+                                          placeholder="请输入问卷描述（可选）">{{ questionnaire.description|default_if_none:'' }}</textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 问题列表 -->
+                    <div id="questions-container">
+                        <h5 class="mb-3"><i class="fas fa-question-circle me-2"></i>问题列表</h5>
+
+                        {% for question in questionnaire.questions.all %}
+                        <div class="question-card" data-id="{{ question.id }}">
+                            <div class="question-header">
+                                <div>
+                                    <span class="question-number">{{ forloop.counter }}</span>
+                                    <strong>{{ question.text }}</strong>
+                                    <span class="badge question-type-badge bg-secondary ms-2">
+                                        {{ question.get_question_type_display }}
+                                    </span>
+                                </div>
+                                <div>
+                                    <button type="button" class="btn btn-sm btn-outline-primary edit-question-btn" data-id="{{ question.id }}">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger delete-question-btn" data-id="{{ question.id }}">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    <span class="sortable-handle"><i class="fas fa-arrows-alt"></i></span>
+                                </div>
+                            </div>
+
+                            {% if question.question_type in 'radio,checkbox' %}
+                            <div class="options-list">
+                                <label class="form-label">选项：</label>
+                                {% for option in question.options %}
+                                <div class="option-item">
+                                    {% if question.question_type == 'radio' %}
+                                    <input type="radio" disabled class="me-2">
+                                    {% else %}
+                                    <input type="checkbox" disabled class="me-2">
+                                    {% endif %}
+                                    <span>{{ option }}</span>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+
+                            <div class="mt-3">
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" disabled {% if question.required %}checked{% endif %}>
+                                    <label class="form-check-label text-muted">必填</label>
+                                </div>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <div class="text-center py-5 border rounded">
+                            <i class="fas fa-question fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">还没有添加问题</p>
+                            <p class="text-muted small">点击左侧的问题类型开始添加</p>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <!-- 预览区域 -->
+                    <div class="preview-section mt-5">
+                        <h6><i class="fas fa-eye me-2"></i>预览</h6>
+                        <div id="question-preview" class="mt-3">
+                            <!-- 预览内容会通过JavaScript动态生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部操作按钮 -->
+        <div class="action-buttons">
+            <div class="container">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <button type="button" class="btn btn-outline-secondary" data-action="exit">
+                                    <i class="fas fa-times me-2"></i>退出（不保存）
+                                </button>
+                            </div>
+                            <div>
+                                <button type="button" class="btn btn-warning me-2" data-action="save_draft">
+                                    <i class="fas fa-save me-2"></i>暂存
+                                </button>
+                                <button type="button" class="btn btn-success" data-action="publish">
+                                    <i class="fas fa-paper-plane me-2"></i>发布问卷
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 问题编辑模态框 -->
+    <div class="modal fade" id="questionModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">编辑问题</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="questionForm">
+                        <div class="mb-3">
+                            <label class="form-label">问题内容</label>
+                            <textarea class="form-control" name="text" rows="2" placeholder="请输入问题内容" required></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">问题类型</label>
+                            <select class="form-select" name="question_type" required>
+                                {% for value, label in question_types %}
+                                <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3" id="options-section" style="display: none;">
+                            <label class="form-label">选项</label>
+                            <div id="options-container">
+                                <!-- 选项会通过JavaScript动态添加 -->
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary mt-2" id="add-option-btn">
+                                <i class="fas fa-plus me-1"></i>添加选项
+                            </button>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" name="required" id="required" checked>
+                                <label class="form-check-label" for="required">必填问题</label>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="save-question-btn">保存问题</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap & jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.14.0/Sortable.min.js"></script>
+
+    <script>
+        $(document).ready(function() {
+            let currentQuestionId = null;
+            let questions = [];
+
+            // 初始化问题列表
+            {% for question in questionnaire.questions.all %}
+            questions.push({
+                id: '{{ question.id }}',
+                text: '{{ question.text|escapejs }}',
+                question_type: '{{ question.question_type }}',
+                options: {{ question.options|safe }},
+                required: {% if question.required %}true{% else %}false{% endif %},
+                order: {{ question.order }}
+            });
+            {% endfor %}
+
+            // 使问题列表可排序
+            new Sortable(document.getElementById('questions-container'), {
+                handle: '.sortable-handle',
+                animation: 150,
+                onEnd: function() {
+                    updateQuestionNumbers();
+                }
+            });
+
+            // 更新问题编号
+            function updateQuestionNumbers() {
+                $('.question-card').each(function(index) {
+                    $(this).find('.question-number').text(index + 1);
+                });
+            }
+
+            // 添加问题按钮点击
+            $('.add-question-btn').click(function() {
+                const type = $(this).data('type');
+                showQuestionModal(type);
+            });
+
+            // 编辑问题按钮点击
+            $(document).on('click', '.edit-question-btn', function() {
+                const questionId = $(this).data('id');
+                const question = questions.find(q => q.id == questionId);
+                if (question) {
+                    currentQuestionId = questionId;
+                    showQuestionModal(question.question_type, question);
+                }
+            });
+
+            // 删除问题按钮点击
+            $(document).on('click', '.delete-question-btn', function() {
+                const questionId = $(this).data('id');
+                if (confirm('确定要删除这个问题吗？')) {
+                    $(`[data-id="${questionId}"]`).remove();
+                    questions = questions.filter(q => q.id != questionId);
+                    updateQuestionNumbers();
+                }
+            });
+
+            // 显示问题编辑模态框
+            function showQuestionModal(type, question = null) {
+                $('#questionForm')[0].reset();
+
+                // 设置问题类型
+                $('select[name="question_type"]').val(type);
+
+                // 显示/隐藏选项区域
+                if (type === 'radio' || type === 'checkbox') {
+                    $('#options-section').show();
+                    initOptions(question ? question.options : ['选项1', '选项2']);
+                } else {
+                    $('#options-section').hide();
+                }
+
+                // 填充现有数据
+                if (question) {
+                    $('textarea[name="text"]').val(question.text);
+                    $('input[name="required"]').prop('checked', question.required);
+                }
+
+                $('#questionModal').modal('show');
+            }
+
+            // 初始化选项
+            function initOptions(options) {
+                $('#options-container').empty();
+                options.forEach((option, index) => {
+                    addOptionField(option, index);
+                });
+            }
+
+            // 添加选项字段
+            function addOptionField(value = '', index = null) {
+                if (index === null) {
+                    index = $('#options-container .option-field').length;
+                }
+
+                const optionHtml = `
+                    <div class="option-field mb-2">
+                        <div class="input-group">
+                            <input type="text" class="form-control option-input"
+                                   value="${value}"
+                                   placeholder="选项内容" required>
+                            <button type="button" class="btn btn-outline-danger remove-option-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+                $('#options-container').append(optionHtml);
+            }
+
+            // 添加选项按钮点击
+            $('#add-option-btn').click(function() {
+                addOptionField();
+            });
+
+            // 移除选项按钮点击
+            $(document).on('click', '.remove-option-btn', function() {
+                if ($('#options-container .option-field').length > 1) {
+                    $(this).closest('.option-field').remove();
+                } else {
+                    alert('至少需要一个选项');
+                }
+            });
+
+            // 保存问题
+            $('#save-question-btn').click(function() {
+                const questionData = {
+                    text: $('textarea[name="text"]').val(),
+                    question_type: $('select[name="question_type"]').val(),
+                    required: $('input[name="required"]').is(':checked'),
+                    options: []
+                };
+
+                // 收集选项
+                if (questionData.question_type === 'radio' || questionData.question_type === 'checkbox') {
+                    $('.option-input').each(function() {
+                        const value = $(this).val().trim();
+                        if (value) {
+                            questionData.options.push(value);
+                        }
+                    });
+
+                    if (questionData.options.length === 0) {
+                        alert('请至少添加一个选项');
+                        return;
+                    }
+                }
+
+                if (!questionData.text.trim()) {
+                    alert('请输入问题内容');
+                    return;
+                }
+
+                // 保存问题
+                if (currentQuestionId) {
+                    // 更新现有问题
+                    const index = questions.findIndex(q => q.id == currentQuestionId);
+                    if (index !== -1) {
+                        questions[index] = { ...questions[index], ...questionData };
+                    }
+                    currentQuestionId = null;
+                } else {
+                    // 添加新问题
+                    questionData.id = 'new_' + Date.now();
+                    questionData.order = questions.length + 1;
+                    questions.push(questionData);
+                }
+
+                updateQuestionList();
+                $('#questionModal').modal('hide');
+            });
+
+            // 更新问题列表显示
+            function updateQuestionList() {
+                $('#questions-container').empty();
+
+                if (questions.length === 0) {
+                    $('#questions-container').html(`
+                        <div class="text-center py-5 border rounded">
+                            <i class="fas fa-question fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">还没有添加问题</p>
+                            <p class="text-muted small">点击左侧的问题类型开始添加</p>
+                        </div>
+                    `);
+                    return;
+                }
+
+                questions.forEach((question, index) => {
+                    const optionsHtml = question.question_type === 'radio' || question.question_type === 'checkbox'
+                        ? question.options.map(option => `
+                            <div class="option-item">
+                                ${question.question_type === 'radio'
+                                    ? '<input type="radio" disabled class="me-2">'
+                                    : '<input type="checkbox" disabled class="me-2">'}
+                                <span>${option}</span>
+                            </div>
+                        `).join('')
+                        : '';
+
+                    const questionHtml = `
+                        <div class="question-card" data-id="${question.id}">
+                            <div class="question-header">
+                                <div>
+                                    <span class="question-number">${index + 1}</span>
+                                    <strong>${question.text}</strong>
+                                    <span class="badge question-type-badge bg-secondary ms-2">
+                                        ${$('select[name="question_type"] option[value="' + question.question_type + '"]').text()}
+                                    </span>
+                                </div>
+                                <div>
+                                    <button type="button" class="btn btn-sm btn-outline-primary edit-question-btn" data-id="${question.id}">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger delete-question-btn" data-id="${question.id}">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                    <span class="sortable-handle"><i class="fas fa-arrows-alt"></i></span>
+                                </div>
+                            </div>
+                            ${optionsHtml ? `
+                                <div class="options-list">
+                                    <label class="form-label">选项：</label>
+                                    ${optionsHtml}
+                                </div>
+                            ` : ''}
+                            <div class="mt-3">
+                                <div class="form-check form-check-inline">
+                                    <input type="checkbox" class="form-check-input" disabled ${question.required ? 'checked' : ''}>
+                                    <label class="form-check-label text-muted">必填</label>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    $('#questions-container').append(questionHtml);
+                });
+            }
+
+            // 操作按钮点击
+            $('[data-action]').click(function() {
+                const action = $(this).data('action');
+
+                if (action === 'exit') {
+                    if (confirm('确定要退出吗？未保存的更改将丢失。')) {
+                        window.location.href = "{% if questionnaire %}{% url 'questionnaire_detail' questionnaire.id %}{% else %}{% url 'my_questionnaires' %}{% endif %}";
+                    }
+                } else if (action === 'save_draft' || action === 'publish') {
+                    saveQuestionnaire(action);
+                }
+            });
+
+            // 保存问卷
+            function saveQuestionnaire(action) {
+                // 收集表单数据
+                const formData = new FormData();
+                formData.append('title', $('input[name="title"]').val());
+                formData.append('description', $('textarea[name="description"]').val());
+                formData.append('require_login', $('input[name="require_login"]').is(':checked'));
+                formData.append('is_public', $('input[name="is_public"]').is(':checked'));
+                formData.append('action', action);
+
+                // 添加CSRF令牌
+                const csrfToken = $('input[name="csrfmiddlewaretoken"]').val();
+                formData.append('csrfmiddlewaretoken', csrfToken);
+
+                // 添加问题数据
+                questions.forEach((question, index) => {
+                    formData.append(`question_${index}_text`, question.text);
+                    formData.append(`question_${index}_type`, question.question_type);
+                    formData.append(`question_${index}_required`, question.required);
+                    formData.append(`question_${index}_order`, index + 1);
+
+                    if (question.question_type === 'radio' || question.question_type === 'checkbox') {
+                        question.options.forEach((option, optionIndex) => {
+                            formData.append(`question_${index}_option_${optionIndex}`, option);
+                        });
+                    }
+                });
+
+                // 提交表单
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        if (response.success) {
+                            window.location.href = response.redirect_url;
+                        } else {
+                            alert('保存失败：' + response.error);
+                        }
+                    },
+                    error: function() {
+                        alert('保存失败，请重试');
+                    }
+                });
+            }
+
+            // 初始更新问题列表
+            updateQuestionList();
+        });
+    </script>
+</body>
+</html>

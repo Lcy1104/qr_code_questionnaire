@@ -1,0 +1,153 @@
+{% extends 'notification/base.html' %}
+{% load static %}
+
+{% block title %}消息通知 - 问卷系统{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show mb-3" role="alert">
+        {{ error }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endif %}
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="fas fa-bell me-2"></i>消息通知
+            {% if unread_count > 0 %}
+                <span class="badge bg-danger ms-2">{{ unread_count }} 未读</span>
+            {% endif %}
+        </h2>
+        <div>
+            <form action="{% url 'mark_all_read' %}" method="POST" style="display: inline;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-primary me-2">
+                    <i class="fas fa-check-double me-1"></i>标记所有为已读
+                </button>
+            </form>
+            <a href="{% url 'notification_settings' %}" class="btn btn-outline-secondary">
+                <i class="fas fa-cog me-1"></i>通知设置
+            </a>
+        </div>
+    </div>
+
+    {% if notifications %}
+    <div class="card">
+        <div class="list-group list-group-flush">
+            {% for notification in notifications %}
+            <div class="list-group-item list-group-item-action {% if not notification.is_read %}bg-light{% endif %}">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <div class="d-flex align-items-center mb-1">
+                            <span class="badge 
+                                {% if notification.notification_type == 'questionnaire_update' %}bg-info
+                                {% elif notification.notification_type == 'admin' %}bg-danger
+                                {% elif notification.notification_type == 'system' %}bg-primary
+                                {% else %}bg-secondary{% endif %} me-2">
+                                {{ notification.get_notification_type_display }}
+                            </span>
+                            <h6 class="mb-0">
+                                {% if not notification.is_read %}
+                                    <strong>{{ notification.title }}</strong>
+                                {% else %}
+                                    {{ notification.title }}
+                                {% endif %}
+                            </h6>
+                        </div>
+                        <p class="mb-1 text-muted">{{ notification.message }}</p>
+                        {% if notification.related_questionnaire %}
+                        <small class="text-info">
+                            <i class="fas fa-file-alt me-1"></i>
+                            相关问卷: 
+                             <a href="{% url 'dashboard_questionnaire_detail' notification.related_questionnaire.id %}" class="text-info text-decoration-underline">
+                                 {{ notification.related_questionnaire.title }}
+                             </a>
+                        </small>
+                        {% endif %}
+                    </div>
+                    <div class="text-end">
+                        <small class="text-muted d-block">{{ notification.time_since }}</small>
+                        <div class="btn-group btn-group-sm mt-2">
+                            <a href="{% url 'notification_detail' notification.id %}" 
+                               class="btn btn-outline-primary btn-sm position-relative" 
+                               title="查看通知详情" 
+                               data-bs-toggle="tooltip" 
+                               data-bs-placement="top" 
+                               onmouseover="this.style.backgroundColor='#0d6efd'; this.style.color='white';" 
+                               onmouseout="this.style.backgroundColor=''; this.style.color='';">
+                                <i class="fas fa-eye"></i>
+                                <span class="visually-hidden">查看</span>
+                            </a>
+                            <form action="{% url 'delete_notification' notification.id %}" 
+                                  method="POST" 
+                                  class="d-inline" 
+                                  onsubmit="return confirm('确定要删除这条通知吗？');">
+                                {% csrf_token %}
+                                <button type="submit" 
+                                        class="btn btn-outline-danger btn-sm position-relative" 
+                                        title="删除此通知" 
+                                        data-bs-toggle="tooltip" 
+                                        data-bs-placement="top" 
+                                        onmouseover="this.style.backgroundColor='#dc3545'; this.style.color='white';" 
+                                        onmouseout="this.style.backgroundColor=''; this.style.color='';">
+                                    <i class="fas fa-trash"></i>
+                                    <span class="visually-hidden">删除</span>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- 分页 -->
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+                <li class="page-item">
+                    <a class="page-link" href="?page=1">首页</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.previous_page_number }}">上一页</a>
+                </li>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+                {% if page_obj.number == num %}
+                    <li class="page-item active">
+                        <span class="page-link">{{ num }}</span>
+                    </li>
+                {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ num }}">{{ num }}</a>
+                    </li>
+                {% endif %}
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.next_page_number }}">下一页</a>
+                </li>
+                <li class="page-item">
+                    <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}">末页</a>
+                </li>
+            {% endif %}
+        </ul>
+        <p class="text-center text-muted">
+            第 {{ page_obj.number }} 页，共 {{ page_obj.paginator.num_pages }} 页
+        </p>
+    </nav>
+    {% endif %}
+
+    {% else %}
+    <div class="text-center py-5">
+        <i class="fas fa-bell-slash fa-4x text-muted mb-3"></i>
+        <h4 class="text-muted">暂无通知</h4>
+        <p class="text-muted">当有新的问卷更新或系统通知时，它们会显示在这里</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

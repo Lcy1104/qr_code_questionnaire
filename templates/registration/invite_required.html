@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>需要邀请码</title>
+</head>
+<body>
+    <h1>需要邀请码</h1>
+    <p>请输入邀请码以访问此问卷：</p>
+    <form method="post">
+        {% csrf_token %}
+        <input type="text" name="invite_code" required>
+        <button type="submit">提交</button>
+    </form>
+</body>
+</html>

@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ questionnaire.title }} - 数据分析报告</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- ECharts (国内 CDN) -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+    <!-- 引入 html2canvas 和 jspdf -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- 引入 SheetJS 用于 Excel 导出 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <style>
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .navbar { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        .card { border: none; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.08); margin-bottom: 25px; overflow: hidden; }
+        .stat-card { background: white; border-radius: 12px; padding: 25px; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,0.08); border-left: 5px solid; transition: transform 0.3s; }
+        .stat-card:hover { transform: translateY(-5px); }
+        .chart-container { position: relative; height: 200px; width: 100%; margin-bottom: 15px; }
+        .table-hover tbody tr:hover { background-color: rgba(102, 126, 234, 0.1); }
+        .export-btn { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); border: none; border-radius: 30px; padding: 12px 30px; font-weight: 600; color: white; }
+        .action-buttons { display: flex; gap: 4px; }
+        .action-btn { width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 4px; border: 1px solid currentColor; transition: all 0.2s; }
+        .action-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .global-export-btn { border-radius: 20px; padding: 0.375rem 1.5rem; }
+        .hidden { display: none !important; }
+        .stats-badge { background: #e9ecef; border-radius: 20px; padding: 5px 15px; margin-bottom: 15px; display: inline-block; }
+        .answer-table { max-height: 300px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 5px; }
+        .answer-table table { margin-bottom: 0; }
+        .answer-table th { position: sticky; top: 0; background: #f8f9fa; }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="{% url 'dashboard' %}"><i class="fas fa-chart-line me-2"></i>数据分析中心</a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="{% url 'questionnaire_detail' questionnaire.id %}"><i class="fas fa-arrow-left me-1"></i>返回详情</a>
+                <a class="nav-link" href="#" onclick="window.print()"><i class="fas fa-print me-1"></i>打印报告</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4" id="report-container">
+        <!-- 报告头部 -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body text-center py-5" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                        <h1 class="display-5 fw-bold mb-3">{{ questionnaire.title }}</h1>
+                        <h4 class="mb-4">数据分析报告</h4>
+                        <p class="lead mb-0">生成时间：{{ current_time|date:"Y年m月d日 H:i:s" }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 核心统计卡片 -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stat-card" style="border-left-color: #667eea;">
+                    <div class="text-primary mb-2"><i class="fas fa-eye fa-3x"></i></div>
+                    <h2 class="fw-bold">{{ summary.total_responses }}</h2>
+                    <p class="text-muted mb-0">总回答数</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card" style="border-left-color: #f5576c;">
+                    <div class="text-danger mb-2"><i class="fas fa-percentage fa-3x"></i></div>
+                    <h2 class="fw-bold">{{ summary.completion_rate|floatformat:1 }}%</h2>
+                    <p class="text-muted mb-0">完成率</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card" style="border-left-color: #4CAF50;">
+                    <div class="text-success mb-2"><i class="fas fa-question-circle fa-3x"></i></div>
+                    <h2 class="fw-bold">{{ summary.total_questions }}</h2>
+                    <p class="text-muted mb-0">问题总数</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card" style="border-left-color: #FF9800;">
+                    <div class="text-warning mb-2"><i class="fas fa-clock fa-3x"></i></div>
+                    <h2 class="fw-bold">{{ summary.average_time }}</h2>
+                    <p class="text-muted mb-0">平均用时</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 总体统计卡片 ========== -->
+        <div class="card mb-4" id="summary-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-chart-pie me-2"></i>总体统计</span>
+                <div class="action-buttons">
+                    <button class="action-btn btn btn-outline-secondary btn-sm toggle-summary-chart" data-target="summary-charts"><i class="fas fa-eye"></i></button>
+                    <button class="action-btn btn btn-outline-primary btn-sm download-summary-chart"><i class="fas fa-download"></i></button>
+                </div>
+            </div>
+            <div class="card-body" id="summary-charts">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="chart-container" id="daily-chart"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container" id="hourly-chart"></div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="chart-container" id="duration-chart"></div>
+                        <div id="duration-stats" class="stats-badge text-center"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container" id="completion-pie-chart"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 每个问题的分析区域 ========== -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-white">
+                        <h4 class="mb-0"><i class="fas fa-chart-pie me-2 text-primary"></i>各问题详细分析</h4>
+                    </div>
+                    <div class="card-body">
+                        <div id="questions-charts"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 时间序列卡片 ========== -->
+        <div class="card mb-4" id="time-series-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-chart-line me-2"></i>时间序列分析</span>
+                <div class="action-buttons">
+                    <button class="action-btn btn btn-outline-secondary btn-sm toggle-time-series" data-target="time-series-charts"><i class="fas fa-eye"></i></button>
+                    <button class="action-btn btn btn-outline-primary btn-sm download-time-series"><i class="fas fa-download"></i></button>
+                </div>
+            </div>
+            <div class="card-body" id="time-series-charts">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="chart-container" id="time-series-1"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="chart-container" id="time-series-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 完成率分析卡片 ========== -->
+        <div class="card mb-4" id="completion-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-chart-bar me-2"></i>完成率分析</span>
+                <div class="action-buttons">
+                    <button class="action-btn btn btn-outline-secondary btn-sm toggle-completion" data-target="completion-charts"><i class="fas fa-eye"></i></button>
+                    <button class="action-btn btn btn-outline-primary btn-sm download-completion"><i class="fas fa-download"></i></button>
+                </div>
+            </div>
+            <div class="card-body" id="completion-charts">
+                <div class="chart-container" id="completion-bar" style="height:400px;"></div>
+            </div>
+        </div>
+
+        <!-- 原始数据表格（已移除 IP 列） -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header"><h5 class="mb-0"><i class="fas fa-list me-2 text-info"></i>原始数据</h5></div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="data-table">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>#</th>
+                                        <th>用户</th>
+                                        <th>提交时间</th>
+                                        <th>用时(秒)</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for response in responses|slice:":20" %}
+                                    <tr>
+                                        <td>{{ forloop.counter }}</td>
+                                        <td>{% if response.user %}{{ response.user.username }}{% else %}匿名用户{% endif %}</td>
+                                        <td>{{ response.submitted_at|date:"Y-m-d H:i:s" }}</td>
+                                        <td>{% if response.completion_time %}{{ response.completion_time }}{% else %}--{% endif %}</td>
+                                        <td><a href="{% url 'response_detail' response.id %}" class="btn btn-sm btn-outline-primary">详情</a></td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr><td colspan="5" class="text-center py-4"><i class="fas fa-inbox fa-3x text-muted mb-3"></i><p class="text-muted">暂无数据</p></td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部导出选项（功能已修正） -->
+        <div class="row mb-5">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body text-center py-4">
+                        <h4 class="mb-3">导出分析报告</h4>
+                        <div class="d-flex justify-content-center gap-3">
+                            <button class="btn export-btn" id="exportPDF"><i class="fas fa-file-pdf me-2"></i>导出PDF</button>
+                            <button class="btn btn-outline-primary" style="border-radius:30px; padding:12px 30px;" id="exportExcel"><i class="fas fa-file-excel me-2"></i>导出Excel</button>
+                            <button class="btn btn-outline-success" style="border-radius:30px; padding:12px 30px;" id="exportAllChartsPNG"><i class="fas fa-image me-2"></i>导出PNG</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // ========== 安全解析 JSON ==========
+        function safeJSONParse(str, defaultValue) {
+            if (!str || str.trim() === '') return defaultValue;
+            try { return JSON.parse(str); } catch (e) { console.error('JSON解析失败:', str, e); return defaultValue; }
+        }
+
+        var trendLabels = safeJSONParse('{{ trend_labels|safe }}', []);
+        var trendData = safeJSONParse('{{ trend_data|safe }}', []);
+        var timeLabels = safeJSONParse('{{ time_labels|safe }}', []);
+        var timeData = safeJSONParse('{{ time_data|safe }}', []);
+        var durationData = safeJSONParse('{{ duration_data|safe }}', []);
+        var completionData = safeJSONParse('{{ completion_data|safe }}', []);
+        var questionStats = safeJSONParse('{{ question_stats|safe }}', []);
+
+        // ========== 总体统计图表 ==========
+        var dailyChart = echarts.init(document.getElementById('daily-chart'));
+        dailyChart.setOption({
+            title: { text: '每日提交量', left: 'center' },
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: trendLabels },
+            yAxis: { type: 'value', min: 0 },
+            series: [{ type: 'line', data: trendData, smooth: true, lineStyle: { color: '#667eea' } }]
+        });
+
+        var hourlyChart = echarts.init(document.getElementById('hourly-chart'));
+        hourlyChart.setOption({
+            title: { text: '提交时间分布', left: 'center' },
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: timeLabels },
+            yAxis: { type: 'value', min: 0 },
+            series: [{ type: 'bar', data: timeData, itemStyle: { color: '#f5576c' } }]
+        });
+
+        var durationChart = echarts.init(document.getElementById('duration-chart'));
+        var durationStatsDiv = document.getElementById('duration-stats');
+        if (durationData && durationData.length > 0) {
+            var mean = (durationData.reduce((a,b)=>a+b,0)/durationData.length).toFixed(1);
+            var sorted = durationData.slice().sort((a,b)=>a-b);
+            var median = sorted[Math.floor(sorted.length/2)].toFixed(1);
+            var minVal = Math.min(...durationData);
+            var maxVal = Math.max(...durationData);
+            durationStatsDiv.innerHTML = `样本数: ${durationData.length} | 平均: ${mean}秒 | 中位数: ${median}秒 | 范围: ${minVal.toFixed(1)}~${maxVal.toFixed(1)}秒`;
+
+            var bins = 10;
+            var step = (maxVal - minVal) / bins;
+            var xAxisData = [];
+            var histData = [];
+            if (step === 0) {
+                xAxisData = [`${minVal.toFixed(1)}`];
+                histData = [durationData.length];
+            } else {
+                for (var i = 0; i < bins; i++) {
+                    var start = minVal + i * step;
+                    var end = minVal + (i + 1) * step;
+                    xAxisData.push(`${start.toFixed(1)}-${end.toFixed(1)}`);
+                }
+                histData = Array(bins).fill(0);
+                durationData.forEach(v => {
+                    var idx = Math.floor((v - minVal) / step);
+                    if (idx === bins) idx = bins-1;
+                    histData[idx]++;
+                });
+            }
+            durationChart.setOption({
+                title: { text: '回答时长分布', left: 'center' },
+                tooltip: { trigger: 'axis' },
+                xAxis: { type: 'category', data: xAxisData, axisLabel: { rotate: 45 } },
+                yAxis: { type: 'value', min: 0 },
+                series: [{ type: 'bar', data: histData, name: '人数' }]
+            });
+        } else {
+            durationStatsDiv.innerHTML = '暂无数据';
+            durationChart.setOption({
+                title: { text: '回答时长分布', left: 'center' },
+                graphic: { type: 'text', left: 'center', top: 'middle', style: { text: '暂无数据', fill: '#999' } }
+            });
+        }
+
+        var completionPieChart = echarts.init(document.getElementById('completion-pie-chart'));
+        var totalResponses = {{ summary.total_responses }};
+        var totalViews = {{ questionnaire.view_count }};
+        var completed = totalResponses;
+        var notCompleted = Math.max(0, totalViews - totalResponses);
+        completionPieChart.setOption({
+            title: { text: '问卷完成率', left: 'center' },
+            tooltip: { trigger: 'item' },
+            series: [{
+                type: 'pie',
+                radius: ['40%', '70%'],
+                data: [
+                    { name: '已完成', value: completed },
+                    { name: '未完成', value: notCompleted }
+                ],
+                label: { show: true, formatter: '{b}: {c} ({d}%)' }
+            }]
+        });
+
+        // ========== 每个问题的分析 ==========
+        var questionsContainer = document.getElementById('questions-charts');
+        var allQuestionCharts = []; // 存储有图表的卡片（选择题）
+
+        if (questionStats && questionStats.length > 0) {
+            var html = '';
+            questionStats.forEach(function(q, index) {
+                var typeDisplay = q.type === 'radio' ? '单选题' : (q.type === 'checkbox' ? '多选题' : '简答题');
+                html += `
+                    <div class="card mb-4" id="question-card-${q.id}">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">${index+1}. ${q.text} (${typeDisplay})</h6>
+                            <div class="action-buttons">
+                                <button class="action-btn btn btn-outline-secondary btn-sm toggle-question-chart" data-target="question-charts-${q.id}"><i class="fas fa-eye"></i></button>
+                                <button class="action-btn btn btn-outline-primary btn-sm download-question-chart" data-question-id="${q.id}"><i class="fas fa-download"></i></button>
+                            </div>
+                        </div>
+                        <div class="card-body" id="question-charts-${q.id}">
+                        </div>
+                    </div>
+                `;
+            });
+            questionsContainer.innerHTML = html;
+
+            questionStats.forEach(function(q, index) {
+                var container = document.getElementById(`question-charts-${q.id}`);
+                if (!container) return;
+
+                if (q.type === 'radio' || q.type === 'checkbox') {
+                    // 选择题：条形图 + 饼图
+                    container.innerHTML = `
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="chart-container" id="question-${q.id}-bar"></div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="chart-container" id="question-${q.id}-pie"></div>
+                            </div>
+                        </div>
+                    `;
+
+                    var barChart = echarts.init(document.getElementById(`question-${q.id}-bar`));
+                    barChart.setOption({
+                        title: { show: false },
+                        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                        xAxis: { type: 'value', min: 0 },
+                        yAxis: { type: 'category', data: q.options.map((opt, i) => String.fromCharCode(65+i) + '. ' + opt), axisLabel: { fontSize: 11 } },
+                        series: [{ name: '回答数量', type: 'bar', data: q.counts, itemStyle: { color: '#5B8FF9' } }]
+                    });
+
+                    var pieData = q.options.map((opt, i) => ({ name: String.fromCharCode(65+i) + '. ' + opt, value: q.counts[i] })).filter(item => item.value > 0);
+                    var pieChart = echarts.init(document.getElementById(`question-${q.id}-pie`));
+                    var pieOption = {
+                        title: { show: false },
+                        tooltip: { trigger: 'item' },
+                        series: [{
+                            type: 'pie',
+                            radius: ['40%', '70%'],
+                            data: pieData,
+                            label: { show: true, formatter: '{b}: {c} ({d}%)' }
+                        }]
+                    };
+                    if (pieData.length === 0) {
+                        pieOption.graphic = { type: 'text', left: 'center', top: 'middle', style: { text: '暂无回答', fill: '#999' } };
+                    }
+                    pieChart.setOption(pieOption);
+
+                    allQuestionCharts.push({ id: q.id, charts: [barChart, pieChart] });
+
+                } else if (q.type === 'text') {
+                    // 简答题：表格展示用户和答案
+                    var listHtml = '<div class="answer-table"><table class="table table-sm table-striped"><thead><tr><th>用户</th><th>答案</th></tr></thead><tbody>';
+                    if (q.answers && q.answers.length > 0) {
+                        q.answers.slice(0, 20).forEach(item => {
+                            listHtml += `<tr><td>${item.user}</td><td>${item.answer}</td></tr>`;
+                        });
+                        if (q.answers.length > 20) {
+                            listHtml += `<tr><td colspan="2" class="text-muted">... 还有 ${q.answers.length - 20} 条回答未显示</td></tr>`;
+                        }
+                    } else {
+                        listHtml += `<tr><td colspan="2" class="text-center">暂无回答</td></tr>`;
+                    }
+                    listHtml += '</tbody></table></div>';
+                    container.innerHTML = listHtml;
+                    // 无图表，不加入 allQuestionCharts
+                }
+            });
+        } else {
+            questionsContainer.innerHTML = '<p class="text-muted text-center py-4">暂无问题数据</p>';
+        }
+
+        // ========== 时间序列图表 ==========
+        var timeSeries1 = echarts.init(document.getElementById('time-series-1'));
+        var hours = [];
+        for (var i = 0; i < 24; i++) hours.push(i + ':00');
+        timeSeries1.setOption({
+            title: { text: '提交时间序列', left: 'center' },
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: hours },
+            yAxis: { type: 'value', min: 0 },
+            series: [{ type: 'line', data: timeData, smooth: true }]
+        });
+
+        var timeSeries2 = echarts.init(document.getElementById('time-series-2'));
+        var cumulative = [];
+        var sum = 0;
+        timeData.forEach(v => { sum += v; cumulative.push(sum); });
+        timeSeries2.setOption({
+            title: { text: '累计提交趋势', left: 'center' },
+            tooltip: { trigger: 'axis' },
+            xAxis: { type: 'category', data: timeLabels },
+            yAxis: { type: 'value', min: 0 },
+            series: [{ type: 'line', data: cumulative, smooth: true, areaStyle: {} }]
+        });
+
+        // ========== 完成率分析 ==========
+        var completionBar = echarts.init(document.getElementById('completion-bar'));
+        var questions = completionData.map(item => item.question);
+        var rates = completionData.map(item => item.rate);
+        completionBar.setOption({
+            title: { text: '各问题完成率', left: 'center' },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+            xAxis: { type: 'value', min: 0, max: 100 },
+            yAxis: { type: 'category', data: questions },
+            series: [{
+                type: 'bar',
+                data: rates,
+                label: { show: true, position: 'right', formatter: '{c}%' },
+                itemStyle: { color: '#5B8FF9' }
+            }]
+        });
+
+        // ========== 卡片显示/隐藏功能 ==========
+        function toggleCard(btn, targetId) {
+            var target = document.getElementById(targetId);
+            if (target) {
+                target.classList.toggle('hidden');
+                var icon = btn.querySelector('i');
+                icon.classList.toggle('fa-eye');
+                icon.classList.toggle('fa-eye-slash');
+                setTimeout(() => {
+                    if (targetId === 'summary-charts') {
+                        dailyChart.resize(); hourlyChart.resize(); durationChart.resize(); completionPieChart.resize();
+                    } else if (targetId.startsWith('question-charts-')) {
+                        var qid = targetId.replace('question-charts-', '');
+                        var info = allQuestionCharts.find(c => c.id == qid);
+                        if (info) info.charts.forEach(chart => chart.resize());
+                    } else if (targetId === 'time-series-charts') {
+                        timeSeries1.resize(); timeSeries2.resize();
+                    } else if (targetId === 'completion-charts') {
+                        completionBar.resize();
+                    }
+                }, 200);
+            }
+        }
+
+        document.querySelectorAll('.toggle-summary-chart').forEach(btn => btn.addEventListener('click', function() { toggleCard(this, 'summary-charts'); }));
+        document.querySelectorAll('.toggle-time-series').forEach(btn => btn.addEventListener('click', function() { toggleCard(this, 'time-series-charts'); }));
+        document.querySelectorAll('.toggle-completion').forEach(btn => btn.addEventListener('click', function() { toggleCard(this, 'completion-charts'); }));
+        document.querySelectorAll('.toggle-question-chart').forEach(btn => btn.addEventListener('click', function() { toggleCard(this, this.getAttribute('data-target')); }));
+
+        // ========== 卡片下载功能（单个卡片截图 PNG） ==========
+        function downloadCard(cardId, filename) {
+            var card = document.getElementById(cardId);
+            if (!card) return;
+            html2canvas(card, { scale: 2, backgroundColor: '#fff' }).then(canvas => {
+                var link = document.createElement('a');
+                link.download = filename;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }).catch(err => { alert('导出失败，请重试'); });
+        }
+
+        document.querySelector('.download-summary-chart').addEventListener('click', function() { downloadCard('summary-card', '总体统计.png'); });
+        document.querySelector('.download-time-series').addEventListener('click', function() { downloadCard('time-series-card', '时间序列.png'); });
+        document.querySelector('.download-completion').addEventListener('click', function() { downloadCard('completion-card', '完成率分析.png'); });
+        document.querySelectorAll('.download-question-chart').forEach(btn => btn.addEventListener('click', function() { downloadCard(`question-card-${this.getAttribute('data-question-id')}`, `问题_${this.getAttribute('data-question-id')}.png`); }));
+
+        // ========== 导出PDF：遍历所有卡片，每个卡片一页 PDF ==========
+        document.getElementById('exportPDF').addEventListener('click', function() {
+            // 收集所有卡片（包括 summary-card, time-series-card, completion-card 和所有问题卡片）
+            var cards = [
+                { id: 'summary-card' },
+                { id: 'time-series-card' },
+                { id: 'completion-card' }
+            ];
+            questionStats.forEach(q => {
+                cards.push({ id: `question-card-${q.id}` });
+            });
+
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('l', 'mm', 'a4'); // 横向 A4
+            var promise = Promise.resolve();
+            var pageIndex = 0;
+
+            cards.forEach(card => {
+                promise = promise.then(() => {
+                    return html2canvas(document.getElementById(card.id), { scale: 2, backgroundColor: '#fff' }).then(canvas => {
+                        if (pageIndex > 0) pdf.addPage();
+                        pageIndex++;
+                        var imgData = canvas.toDataURL('image/png');
+                        var imgWidth = pdf.internal.pageSize.getWidth();
+                        var imgHeight = (canvas.height * imgWidth) / canvas.width;
+                        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+                    });
+                });
+            });
+
+            promise.then(() => pdf.save('所有图表.pdf')).catch(err => alert('导出PDF失败，请重试'));
+        });
+
+        // ========== 导出所有图表为PNG：将所有卡片垂直拼接成一张长图 ==========
+        document.getElementById('exportAllChartsPNG').addEventListener('click', function() {
+            var cards = [
+                document.getElementById('summary-card'),
+                document.getElementById('time-series-card'),
+                document.getElementById('completion-card')
+            ];
+            questionStats.forEach(q => {
+                cards.push(document.getElementById(`question-card-${q.id}`));
+            });
+
+            // 过滤掉可能不存在的卡片
+            cards = cards.filter(card => card !== null);
+
+            // 逐个截图，然后拼接
+            Promise.all(cards.map(card => html2canvas(card, { scale: 2, backgroundColor: '#fff' })))
+                .then(canvases => {
+                    // 计算总高度和最大宽度
+                    var totalHeight = canvases.reduce((sum, canvas) => sum + canvas.height, 0);
+                    var maxWidth = Math.max(...canvases.map(c => c.width));
+
+                    // 创建最终画布
+                    var finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = maxWidth;
+                    finalCanvas.height = totalHeight;
+                    var ctx = finalCanvas.getContext('2d');
+
+                    // 依次绘制每个卡片截图
+                    var y = 0;
+                    canvases.forEach(canvas => {
+                        ctx.drawImage(canvas, 0, y, canvas.width, canvas.height);
+                        y += canvas.height;
+                    });
+
+                    // 导出为 PNG
+                    var link = document.createElement('a');
+                    link.download = '所有图表.png';
+                    link.href = finalCanvas.toDataURL('image/png');
+                    link.click();
+                })
+                .catch(err => {
+                    console.error('导出失败:', err);
+                    alert('导出失败，请重试');
+                });
+        });
+
+        // ========== Excel 导出 ==========
+        document.getElementById('exportExcel').addEventListener('click', function() {
+            const table = document.getElementById('data-table');
+            if (!table) return;
+            const ws = XLSX.utils.table_to_sheet(table, { raw: true });
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '原始数据');
+            XLSX.writeFile(wb, '{{ questionnaire.title }}_原始数据.xlsx');
+        });
+
+        window.addEventListener('resize', function() {
+            dailyChart.resize(); hourlyChart.resize(); durationChart.resize(); completionPieChart.resize();
+            timeSeries1.resize(); timeSeries2.resize(); completionBar.resize();
+            allQuestionCharts.forEach(info => info.charts.forEach(chart => chart.resize()));
+        });
+    </script>
+</body>
+</html>

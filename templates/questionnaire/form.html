@@ -1,0 +1,584 @@
+<!-- questionnaire/templates/questionnaire/form.html -->
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<!-- 调试用：原始输出 -->
+{% if user.is_authenticated %}
+<pre>[RAW] 记录数 = {{ record_count }}</pre>
+{% endif %}
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ questionnaire.title }} - 问卷填写</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .border-danger {
+            border: 2px solid #dc3545 !important;
+            transition: border 0.2s ease;
+            }
+        .question-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        .question-text {
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .required-star {
+            color: red;
+        }
+        .submit-btn {
+            min-width: 150px;
+            padding: 12px;
+        }
+        .questionnaire-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .progress-container {
+            margin-bottom: 30px;
+        }
+        .option-item {
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+        <!-- 调试用：显示是否已提交 -->
+    <!-- 调试用：已提交记录信息 -->
+<div class="card mb-3">
+  <div class="card-header bg-info text-white">
+    [DEBUG] 提交记录检测
+  </div>
+  <div class="card-body">
+    <ul class="mb-0">
+      <li>用户：{{ user }}</li>
+      <li>问卷 ID：{{ questionnaire.id }}</li>
+      <li>已提交记录数：
+        <strong class="text-primary">{{ record_count }}</strong>
+      </li>
+      <li>版本号：{{ questionnaire.version }}</li>
+    </ul>
+  </div>
+</div>
+    <div class="container mt-4 mb-5">
+        <!-- 问卷标题区 -->
+        <div class="questionnaire-header">
+            <h1 class="text-center">{{ questionnaire.title }}</h1>
+            {% if questionnaire.description %}
+                <p class="text-center mt-3">{{ questionnaire.description }}</p>
+            {% endif %}
+            <div class="text-center mt-3">
+    <span class="badge bg-light text-dark me-2">{{ questionnaire.view_count }} 次查看</span>
+    <span class="badge bg-light text-dark me-2">{{ questionnaire.submit_count }} 份提交</span>
+    <span class="badge bg-light text-dark me-2">
+        截止:
+    {% if questionnaire.end_time %}
+        {{ questionnaire.end_time|date:"Y-m-d H:i" }}
+    {% else %}
+        永不结束
+    {% endif %}
+    </span>
+    <span class="badge bg-info text-white">版本 {{ questionnaire.version }}</span> <!-- 直接使用对象字段 -->
+</div>
+        </div>
+
+        <!-- 进度条 -->
+        <div class="progress-container">
+            <div class="d-flex justify-content-between mb-1">
+                <span>填写进度</span>
+                <span><span id="answered-count">0</span>/{{ questions.count }}</span>
+            </div>
+            <div class="progress" style="height: 8px;">
+                <div id="progress-bar" class="progress-bar" role="progressbar" style="width: 0"></div>
+            </div>
+        </div>
+
+        <!-- 问卷表单 -->
+        <form id="surveyForm" method="post" action="{% url 'submit_response' questionnaire.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="device_fingerprint" id="device_fingerprint" value="">
+            {% for question in questions %}
+            <div class="question-card" id="question-{{ question.id }}">
+                <div class="question-text">
+                    <span class="question-number">{{ forloop.counter }}.</span>
+                    {{ question.text }}
+                    {% if question.required %}
+                        <span class="required-star" title="此问题为必填项">*</span>
+                    {% endif %}
+                </div>
+
+                <!-- 根据问题类型显示不同的输入控件 -->
+                <div class="question-options">
+    {% if question.question_type == 'radio' %}
+        <!-- 单选题 -->
+        {% if question.options %}
+            {% for option in question.options %}
+            <div class="option-item form-check">
+                <input class="form-check-input question-input"
+                       type="radio"
+                       name="question_{{ question.id }}"
+                       id="option_{{ question.id }}_{{ forloop.counter0 }}"
+                       value="{{ forloop.counter0 }}"
+                       {% if question.required %}required{% endif %}
+                       data-question-id="{{ question.id }}">
+                <label class="form-check-label" for="option_{{ question.id }}_{{ forloop.counter0 }}">
+                    {{ option }}
+                </label>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-danger small">此问题没有设置选项</p>
+        {% endif %}
+
+    {% elif question.question_type == 'checkbox' %}
+        <!-- 多选题 -->
+        {% if question.options %}
+            {% for option in question.options %}
+            <div class="option-item form-check">
+                <input class="form-check-input question-input"
+                       type="checkbox"
+                       name="question_{{ question.id }}"
+                       id="option_{{ question.id }}_{{ forloop.counter0 }}"
+                       value="{{ forloop.counter0 }}"
+                       data-question-id="{{ question.id }}">
+                <label class="form-check-label" for="option_{{ question.id }}_{{ forloop.counter0 }}">
+                    {{ option }}
+                </label>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-danger small">此问题没有设置选项</p>
+        {% endif %}
+
+    {% elif question.question_type == 'text' %}
+        <input type="hidden" name="maxlen_{{ question.id }}" value="{{ question.max_length }}">
+        <!-- 简答题 -->
+        <textarea class="form-control question-input"
+                  name="question_{{ question.id }}"
+                  rows="3"
+                  {% if question.required %}required{% endif %}
+                  data-question-id="{{ question.id }}"
+                  placeholder="请输入您的回答..."
+                  {% if question.max_length > 0 %}maxlength="{{ question.max_length }}"{% endif %}></textarea>
+        <small class="text-muted">
+  {% if question.max_length > 0 %}最多 {{ question.max_length }} 字{% else %}字数不限{% endif %}
+</small>
+
+    {% endif %}
+</div>
+
+                {% if question.description %}
+                <small class="text-muted d-block mt-2">
+                    <i class="bi bi-info-circle"></i> {{ question.description }}
+                </small>
+                {% endif %}
+            </div>
+            {% empty %}
+            <div class="alert alert-warning text-center">
+                该问卷暂时没有设置问题。
+            </div>
+            {% endfor %}
+
+            <!-- 提交按钮 -->
+            <div class="text-center mt-4">
+                <button type="submit" class="btn btn-primary submit-btn">
+                    <span id="submit-text">提交问卷</span>
+                    <div id="submit-spinner" class="spinner-border spinner-border-sm d-none" role="status">
+                        <span class="visually-hidden">提交中...</span>
+                    </div>
+                </button>
+                <a href="{% url 'home' %}" class="btn btn-outline-secondary ms-3">取消</a>
+            </div>
+        </form>
+
+        <!-- 填写提示 -->
+        <div class="alert alert-info mt-4">
+            <h6><i class="bi bi-lightbulb"></i> 填写提示：</h6>
+            <ul class="mb-0">
+                <li>带 <span class="required-star">*</span> 的为必填问题</li>
+                <li>请仔细阅读每个问题后再作答</li>
+                <li>提交后不可修改，请确认无误后再提交</li>
+                <li>问卷截止时间：{{ questionnaire.end_date|date:"Y年m月d日" }}</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <script>
+        $(document).ready(function() {
+             {% if not user.is_authenticated %}
+                const submittedKey = 'submitted_survey_' + '{{ questionnaire.id }}' + '_v' + '{{ questionnaire.version }}';
+                if (localStorage.getItem(submittedKey) === 'true') {
+                    window.location.href = "{% url 'survey_thank_you' questionnaire.id %}";
+                    return;
+                }
+             {% endif %}
+            const startTime = new Date().toISOString();
+            localStorage.setItem('startTime', startTime);
+            let totalQuestions = {{ questions.count }};
+            let answeredQuestions = 0;
+
+            // 初始化检查已回答问题
+            updateProgress();
+
+            // 监听所有输入变化
+            $('.question-input').on('change input', function() {
+                updateProgress();
+            });
+
+            // 更新进度条
+            function updateProgress() {
+                answeredQuestions = 0;
+
+                // 检查每个问题是否已回答
+                $('[id^="question-"]').each(function() {
+                    const questionId = this.id.replace('question-', '');
+                    const inputs = $(`[data-question-id="${questionId}"]`);
+
+                    let answered = false;
+
+                    if (inputs.length > 0) {
+                        const firstInput = inputs.first();
+
+                        if (firstInput.attr('type') === 'radio') {
+                            // 单选题
+                            answered = $(`[name="${firstInput.attr('name')}"]:checked`).length > 0;
+                        } else if (firstInput.attr('type') === 'checkbox') {
+                            // 多选题 - 至少选一个
+                            answered = $(`[name="${firstInput.attr('name')}"]:checked`).length > 0;
+                        } else {
+                            // 文本、日期等类型
+                            answered = $.trim(firstInput.val()) !== '';
+                        }
+                    }
+
+                    if (answered) answeredQuestions++;
+                });
+
+                // 更新进度显示
+                const percentage = totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0;
+                $('#progress-bar').css('width', percentage + '%').attr('aria-valuenow', percentage);
+                $('#answered-count').text(answeredQuestions);
+
+                // 根据进度改变颜色
+                if (percentage < 30) {
+                    $('#progress-bar').removeClass('bg-success bg-warning').addClass('bg-danger');
+                } else if (percentage < 70) {
+                    $('#progress-bar').removeClass('bg-danger bg-success').addClass('bg-warning');
+                } else {
+                    $('#progress-bar').removeClass('bg-danger bg-warning').addClass('bg-success');
+                }
+            }
+
+            function validateForm() {
+    let isValid = true;
+    $('.question-card').each(function() {
+        const $card = $(this);
+        const questionId = this.id.replace('question-', '');
+        const $inputs = $(`[data-question-id="${questionId}"]`);
+        if ($inputs.length === 0) return;
+
+        // 判断题型并检查是否已回答
+        const first = $inputs.first();
+        let answered = false;
+
+        if (first.attr('type') === 'radio') {
+            answered = $(`[name="${first.attr('name')}"]:checked`).length > 0;
+        } else if (first.attr('type') === 'checkbox') {
+            answered = $(`[name="${first.attr('name')}"]:checked`).length > 0;
+        } else {
+            // 文本域
+            answered = $.trim(first.val()) !== '';
+        }
+
+        // 检查此问题是否为必填（通过星号判断）
+        const isRequired = $card.find('.required-star').length > 0;
+        if (isRequired && !answered) {
+            isValid = false;
+            $card.addClass('border-danger'); // 高亮红色边框
+        } else {
+            $card.removeClass('border-danger');
+        }
+    });
+    return isValid;
+}
+
+            // 处理表单提交
+            $('#surveyForm').on('submit', function(e) {
+                e.preventDefault();
+
+                const submitBtn = $('.submit-btn');
+                const submitText = $('#submit-text');
+                const submitSpinner = $('#submit-spinner');
+                console.log('>>> 即将发出 AJAX');
+                const formData = $(this).serialize() + `&start_time=${localStorage.getItem('startTime')}`;
+                console.log('>>> URL =', $(this).attr('action'));
+                console.log('>>> 数据 =', formData);
+                console.log('>>> X-Requested-With = XMLHttpRequest');
+
+                // 禁用按钮并显示加载状态
+                submitBtn.prop('disabled', true);
+                submitText.text('提交中...');
+                submitSpinner.removeClass('d-none');
+
+                // 收集表单数据
+
+                console.log('>>> 即将发出 AJAX');
+                console.log('>>> URL =', $(this).attr('action'));
+                console.log('>>> 数据 =', formData);
+                console.log('>>> X-Requested-With = XMLHttpRequest');
+
+                $.ajax({
+                    url: $(this).attr('action'),
+                    type: 'POST',
+                    data: formData,
+                    headers: {'X-Requested-With': 'XMLHttpRequest'},
+                    success: function(response) {
+                        console.log('>>> jQuery 收到', response);
+                    if (response.ok) {
+                            //location.href = response.redirect;
+                            // 提交成功
+                            alert('问卷提交成功！感谢您的参与。');
+                            {% if not user.is_authenticated %}
+                                localStorage.setItem('submitted_survey_' + '{{ questionnaire.id }}' + '_v' + '{{ questionnaire.version }}', 'true');
+                            {% endif %}
+                            //window.location.href = "{% url 'home' %}";
+                            window.location.href = response.redirect;
+                        } else {
+                            // 提交失败
+                            alert('提交失败：' + response.msg);
+                            submitBtn.prop('disabled', false);
+                            submitText.text('提交问卷');
+                            submitSpinner.addClass('d-none');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.log('>>> jQuery 错误', status, error);
+                        console.log('>>> xhr.responseText =', xhr.responseText);
+                        let msg = '提交时发生错误，请稍后重试。';
+                        if (xhr.responseJSON && xhr.responseJSON.msg) {
+                            msg = xhr.responseJSON.msg;
+                        } else if (xhr.responseText) {
+                        try {
+                            const json = JSON.parse(xhr.responseText);
+                            if (json.msg) msg = json.msg;
+                        } catch (e) {}
+                        }
+                        alert('提交失败：' + msg);
+                        submitBtn.prop('disabled', false);
+                        submitText.text('提交问卷');
+                        submitSpinner.addClass('d-none');
+                    }
+                });
+                if (!validateForm()) {
+        alert('请填写所有必填项（红色星标问题）');
+        return;
+    }
+            });
+
+            // 自动保存草稿（可选功能）
+            let autoSaveTimer;
+            function autoSaveDraft() {
+                clearTimeout(autoSaveTimer);
+                autoSaveTimer = setTimeout(function() {
+                    console.log('自动保存草稿...');
+                    // 这里可以实现草稿保存功能
+                }, 5000); // 5秒后自动保存
+            }
+
+            $('.question-input').on('change input', autoSaveDraft);
+
+        });
+        {% if user.is_authenticated %}
+        document.addEventListener('DOMContentLoaded', function () {
+    // 不再自动跳转，让后端逻辑处理
+    // 后端已经检查当前版本是否提交，如果提交了会重定向到already_submitted页面
+    // 用户能到达这个页面，说明可以填写当前版本的问卷
+
+    // 如果有旧版本提交记录，显示提示信息
+    {% if has_old_version_submission %}
+    showVersionUpdateAlert();
+    {% endif %}
+});
+
+// 显示版本更新提示（可选）
+function showVersionUpdateAlert() {
+    // 创建一个简单的提示
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'alert alert-info alert-dismissible fade show mt-3';
+    alertDiv.innerHTML = `
+        <strong><i class="bi bi-info-circle"></i> 提示：</strong>
+        此问卷已更新至版本 <strong>{{ questionnaire_version }}</strong>。
+        {% if latest_old_version %}
+        您之前提交的是版本 <strong>{{ latest_old_version }}</strong>，现在可以重新填写最新版本的问卷。
+        {% else %}
+        您可以填写此问卷的最新版本。
+        {% endif %}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    // 插入到问卷标题后面
+    const header = document.querySelector('.questionnaire-header');
+    if (header) {
+        header.parentNode.insertBefore(alertDiv, header.nextSibling);
+    }
+}
+{% endif %}
+    </script>
+<script>
+/* 实时字数 + 超量高亮（无弹窗） */
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('textarea[name^="question_"]').forEach(ta => {
+    const qId   = ta.name.replace('question_', '');
+    const maxLen = Number(document.querySelector(`input[name="maxlen_${qId}"]`)?.value || 0);
+    const info  = document.createElement('div');
+    info.className = 'text-muted small mt-1';
+    ta.after(info);
+
+    function update() {
+      const curr = ta.value.length;
+      info.textContent = maxLen ? `${curr} / ${maxLen}` : '字数不限';
+      const over = maxLen && curr > maxLen;
+      info.style.color  = over ? '#dc3545' : '#6c757d';
+      info.style.fontWeight = over ? 'bold' : 'normal';
+      ta.style.border  = over ? '1px solid #dc3545' : '';
+      // 禁用提交按钮
+      document.querySelector('.submit-btn').disabled = over;
+      if (over) info.innerHTML += '&nbsp;<span style="color:#dc3545;font-weight:bold;">（已超出限制，请删减后再提交）</span>';
+    }
+    ta.addEventListener('input', update);
+    update();          // 初始显示
+  });
+});
+</script>
+{% if not user.is_authenticated %}
+<script>
+(function() {
+    // 1. 防重复提交检测
+    var submittedKey = 'submitted_survey_' + '{{ questionnaire.id }}' + '_v' + '{{ questionnaire.version }}';
+    if (localStorage.getItem(submittedKey) === 'true') {
+        window.location.href = "{% url 'survey_thank_you' questionnaire.id %}";
+        return;
+    }
+
+    // 2. 智能指纹加载器
+    function FingerprintLoader(options) {
+        options = options || {};
+        this.urls = options.urls || [
+            'https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js',
+            'https://unpkg.com/@fingerprintjs/fingerprintjs@3/dist/fp.min.js',
+            '{% static "js/fp.min.js" %}'
+        ];
+        this.maxRetries = options.maxRetries || 3;
+        this.timeout = options.timeout || 5000;
+        this.attempt = 0;
+    }
+
+    FingerprintLoader.prototype.loadScript = function(src) {
+        var self = this;
+        return new Promise(function(resolve, reject) {
+            var script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = function() { resolve(window.FingerprintJS); };
+            script.onerror = function() { reject(new Error('Failed to load ' + src)); };
+            setTimeout(function() { reject(new Error('Timeout')); }, self.timeout);
+            document.head.appendChild(script);
+        });
+    };
+
+    FingerprintLoader.prototype.retryLoad = async function() {
+        while (this.attempt < this.maxRetries) {
+            for (var i = 0; i < this.urls.length; i++) {
+                var url = this.urls[i];
+                try {
+                    console.log('[Fingerprint] 尝试加载: ' + url + ' (尝试 ' + (this.attempt + 1) + ')');
+                    var FingerprintJS = await this.loadScript(url);
+                    return FingerprintJS;
+                } catch (err) {
+                    // 忽略错误，继续尝试下一个源
+                }
+            }
+            this.attempt++;
+            if (this.attempt < this.maxRetries) {
+                await this.backoff();
+            }
+        }
+        throw new Error('All sources failed after max retries');
+    };
+
+    FingerprintLoader.prototype.backoff = function() {
+        var delay = Math.pow(2, this.attempt) * 1000;
+        return new Promise(function(resolve) { setTimeout(resolve, delay); });
+    };
+
+    FingerprintLoader.prototype.generateFallbackId = function() {
+        var randomStr = function() {
+            return Math.random().toString(36).substring(2, 15) +
+                   Math.random().toString(36).substring(2, 15);
+        };
+        return randomStr().substring(0, 32);
+    };
+
+    FingerprintLoader.prototype.getFingerprint = async function() {
+        // 优先使用原缓存键
+        var cachedId = localStorage.getItem('anonymous_visitor_id');
+        if (cachedId) {
+            console.log('[Fingerprint] 使用缓存的 anonymous_visitor_id:', cachedId);
+            return cachedId;
+        }
+
+        var FingerprintJS;
+        try {
+            FingerprintJS = await this.retryLoad();
+        } catch (err) {
+            console.warn('[Fingerprint] 加载失败，启用降级方案', err);
+            var fallbackId = this.generateFallbackId();
+            localStorage.setItem('anonymous_visitor_id', fallbackId);
+            return fallbackId;
+        }
+
+        try {
+            var fp = await FingerprintJS.load();
+            var result = await fp.get();
+            var visitorId = result.visitorId;
+            localStorage.setItem('anonymous_visitor_id', visitorId);
+            return visitorId;
+        } catch (err) {
+            console.warn('[Fingerprint] 初始化失败，启用降级方案', err);
+            var fallbackId = this.generateFallbackId();
+            localStorage.setItem('anonymous_visitor_id', fallbackId);
+            return fallbackId;
+        }
+    };
+
+    // 3. 获取指纹并填充隐藏字段
+    (async function() {
+        var loader = new FingerprintLoader();
+        var visitorId = await loader.getFingerprint();
+        var input = document.getElementById('device_fingerprint');
+        if (input) {
+            input.value = visitorId;
+            console.log('[Fingerprint] 最终设备指纹:', visitorId);
+        } else {
+            console.error('[Fingerprint] 未找到 device_fingerprint 输入框');
+        }
+    })();
+})();
+</script>
+{% endif %}
+</body>
+</html>

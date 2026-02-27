@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统统计</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js (国内 CDN) -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+    <!-- 备用 Chart.js -->
+    <script>
+        (function() {
+            if (typeof Chart === 'undefined') {
+                var script = document.createElement('script');
+                script.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+                document.head.appendChild(script);
+            }
+        })();
+    </script>
+    <!-- html2canvas + jspdf 用于导出 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        /* 与 manage_users 风格一致 */
+        .stat-card {
+            transition: transform 0.2s;
+            border: none;
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+        }
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15);
+        }
+        .chart-container {
+            position: relative;
+            height: 200px;
+            width: 100%;
+            transition: opacity 0.3s;
+        }
+        .chart-container.hidden {
+            display: none;
+        }
+        .card-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid rgba(0,0,0,0.125);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 4px;
+            flex-wrap: nowrap;
+        }
+        .action-btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            border-radius: 4px;
+            transition: all 0.2s;
+            border: 1px solid currentColor;
+        }
+        .action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .action-btn.btn-sm {
+            width: 32px !important;
+            height: 32px !important;
+        }
+        .global-export-btn {
+            border-radius: 20px;
+            padding: 0.375rem 1.5rem;
+        }
+        .toast-header.bg-success { background-color: #198754; }
+        .toast-header.bg-danger { background-color: #dc3545; }
+        .toast-header.bg-info { background-color: #0dcaf0; }
+        .btn-close-white { filter: invert(1); }
+    </style>
+</head>
+<body>
+    {% include 'navbar.html' %}
+
+    <!-- 消息 Toast 容器（与 manage_users 一致） -->
+    <div class="position-fixed top-0 end-0 p-3" style="z-index: 1050">
+        {% for message in messages %}
+            {% if "统计" in message.message or "图表" in message.message or "导出" in message.message or "历史" in message.message %}
+                <div class="toast show mb-2" role="alert" aria-live="assertive" aria-atomic="true" data-bs-autohide="true" data-bs-delay="5000">
+                    <div class="toast-header
+                            {% if '成功' in message.message %}bg-success text-white
+                            {% elif '失败' in message.message or '错误' in message.message %}bg-danger text-white
+                            {% else %}bg-info text-white{% endif %}">
+                        <i class="fas
+                            {% if '成功' in message.message %}fa-check-circle
+                            {% elif '失败' in message.message or '错误' in message.message %}fa-exclamation-circle
+                            {% else %}fa-info-circle{% endif %} me-2"></i>
+                        <strong class="me-auto">
+                            {% if '成功' in message.message %}操作成功
+                            {% elif '失败' in message.message %}操作失败
+                            {% else %}系统消息{% endif %}
+                        </strong>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+                    </div>
+                    <div class="toast-body">
+                        {{ message }}
+                    </div>
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <div class="container mt-4">
+        <!-- 面包屑导航 -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'admin_dashboard' %}">管理后台</a></li>
+                <li class="breadcrumb-item active">系统统计</li>
+            </ol>
+        </nav>
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1><i class="fas fa-chart-bar me-2"></i>系统统计</h1>
+            <div>
+                <span class="badge bg-primary">总用户数: {{ total_users }}</span>
+                <span class="badge bg-success ms-2">今日新增: {{ new_users_today }}</span>
+            </div>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="row">
+            <div class="col-md-3 mb-3">
+                <div class="card stat-card bg-primary text-white">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-users me-2"></i>总用户数</h5>
+                        <h2 class="card-text">{{ total_users }}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card stat-card bg-success text-white">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-poll me-2"></i>问卷总数</h5>
+                        <h2 class="card-text">{{ total_questionnaires }}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card stat-card bg-info text-white">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-check-circle me-2"></i>已发布问卷</h5>
+                        <h2 class="card-text">{{ published_questionnaires }}</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="card stat-card bg-warning text-white">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="fas fa-reply-all me-2"></i>总回答数</h5>
+                        <h2 class="card-text">{{ total_responses }}</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 今日新增卡片 -->
+        <div class="card stat-card mb-4">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fas fa-calendar-day me-2"></i>今日新增用户</h5>
+                <h4>{{ new_users_today }}</h4>
+            </div>
+        </div>
+
+        <!-- 全局导出按钮 -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4><i class="fas fa-chart-line me-2"></i>历史趋势</h4>
+            <button class="btn btn-primary global-export-btn" id="exportAllPDF">
+                <i class="fas fa-file-pdf me-1"></i>导出全部为 PDF
+            </button>
+        </div>
+
+        <!-- 图表区域（四个卡片） -->
+        <div class="row" id="chartsRow">
+            <!-- 总用户数图表 -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100 stat-card">
+                    <div class="card-header">
+                        <span><i class="fas fa-users me-1"></i>总用户数</span>
+                        <div class="action-buttons">
+                            <button class="action-btn btn btn-outline-secondary btn-sm toggle-chart-btn" data-target="chartTotalUsers-container" title="显示/隐藏图表">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="action-btn btn btn-outline-primary btn-sm export-chart-btn" data-chart-id="chartTotalUsers" title="导出为PNG">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" id="chartTotalUsers-container">
+                            <canvas id="chartTotalUsers"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 问卷总数图表 -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100 stat-card">
+                    <div class="card-header">
+                        <span><i class="fas fa-poll me-1"></i>问卷总数</span>
+                        <div class="action-buttons">
+                            <button class="action-btn btn btn-outline-secondary btn-sm toggle-chart-btn" data-target="chartTotalQuestionnaires-container" title="显示/隐藏图表">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="action-btn btn btn-outline-primary btn-sm export-chart-btn" data-chart-id="chartTotalQuestionnaires" title="导出为PNG">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" id="chartTotalQuestionnaires-container">
+                            <canvas id="chartTotalQuestionnaires"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 已发布问卷图表 -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100 stat-card">
+                    <div class="card-header">
+                        <span><i class="fas fa-check-circle me-1"></i>已发布问卷</span>
+                        <div class="action-buttons">
+                            <button class="action-btn btn btn-outline-secondary btn-sm toggle-chart-btn" data-target="chartPublished-container" title="显示/隐藏图表">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="action-btn btn btn-outline-primary btn-sm export-chart-btn" data-chart-id="chartPublished" title="导出为PNG">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" id="chartPublished-container">
+                            <canvas id="chartPublished"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- 总回答数图表 -->
+            <div class="col-md-6 mb-4">
+                <div class="card h-100 stat-card">
+                    <div class="card-header">
+                        <span><i class="fas fa-reply-all me-1"></i>总回答数</span>
+                        <div class="action-buttons">
+                            <button class="action-btn btn btn-outline-secondary btn-sm toggle-chart-btn" data-target="chartTotalResponses-container" title="显示/隐藏图表">
+                                <i class="fas fa-eye"></i>
+                            </button>
+                            <button class="action-btn btn btn-outline-primary btn-sm export-chart-btn" data-chart-id="chartTotalResponses" title="导出为PNG">
+                                <i class="fas fa-download"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container" id="chartTotalResponses-container">
+                            <canvas id="chartTotalResponses"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 说明区域 -->
+        <div class="alert alert-info mt-4">
+            <h6><i class="fas fa-info-circle me-2"></i>说明：</h6>
+            <ul class="mb-0">
+                <li>每次加载页面时记录当前数值，图表纵轴从 0 开始。</li>
+                <li>历史数据仅保存在您的浏览器本地，最多保留最近 10 次访问记录。</li>
+                <li>点击卡片头部的眼睛图标可隐藏/显示图表内容。</li>
+                <li>点击下载按钮可导出单个图表为 PNG 图片（包含标题）。</li>
+                <li>点击“导出全部为 PDF”可将所有可见图表干净地拼接为一个 PDF（按网格排列）。</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function() {
+            document.addEventListener('DOMContentLoaded', function() {
+                if (typeof Chart === 'undefined') {
+                    console.error('Chart.js 未加载');
+                    document.getElementById('chartsRow').innerHTML =
+                        '<div class="alert alert-danger">图表库加载失败，请刷新页面或联系管理员。</div>';
+                    return;
+                }
+
+                // ------------------- 配置 -------------------
+                const STORAGE_KEY = 'admin_stats_trend';
+                const MAX_HISTORY = 10;
+
+                const currentStats = {
+                    total_users: {{ total_users }},
+                    total_questionnaires: {{ total_questionnaires }},
+                    published_questionnaires: {{ published_questionnaires }},
+                    total_responses: {{ total_responses }}
+                };
+
+                let history = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
+                    total_users: [],
+                    total_questionnaires: [],
+                    published_questionnaires: [],
+                    total_responses: []
+                };
+
+                const keys = ['total_users', 'total_questionnaires', 'published_questionnaires', 'total_responses'];
+                keys.forEach(key => {
+                    if (!Array.isArray(history[key])) history[key] = [];
+                });
+
+                const now = new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                keys.forEach(key => {
+                    history[key].push({ value: currentStats[key], time: now });
+                    if (history[key].length > MAX_HISTORY) history[key].shift();
+                });
+
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+
+                function getValues(key) { return history[key].map(item => item.value); }
+                function getLabels() { return history.total_users.map(item => item.time); }
+
+                const labels = getLabels();
+
+                const chartOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                    },
+                    plugins: { legend: { display: false }, tooltip: { enabled: true } }
+                };
+
+                function createChart(canvasId, label, data, color) {
+                    const ctx = document.getElementById(canvasId).getContext('2d');
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: label,
+                                data: data,
+                                borderColor: color,
+                                backgroundColor: color.replace('rgb', 'rgba').replace(')', ', 0.1)'),
+                                tension: 0.1,
+                                pointBackgroundColor: color
+                            }]
+                        },
+                        options: chartOptions
+                    });
+                }
+
+                createChart('chartTotalUsers', '总用户数', getValues('total_users'), 'rgb(54, 162, 235)');
+                createChart('chartTotalQuestionnaires', '问卷总数', getValues('total_questionnaires'), 'rgb(75, 192, 192)');
+                createChart('chartPublished', '已发布问卷', getValues('published_questionnaires'), 'rgb(255, 159, 64)');
+                createChart('chartTotalResponses', '总回答数', getValues('total_responses'), 'rgb(153, 102, 255)');
+
+                // 显示/隐藏图表（眼睛按钮）
+                document.querySelectorAll('.toggle-chart-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const targetId = this.getAttribute('data-target');
+                        const container = document.getElementById(targetId);
+                        if (container) {
+                            container.classList.toggle('hidden');
+                            const icon = this.querySelector('i');
+                            if (container.classList.contains('hidden')) {
+                                icon.classList.remove('fa-eye');
+                                icon.classList.add('fa-eye-slash');
+                                this.setAttribute('title', '显示图表');
+                            } else {
+                                icon.classList.remove('fa-eye-slash');
+                                icon.classList.add('fa-eye');
+                                this.setAttribute('title', '隐藏图表');
+                            }
+                        }
+                    });
+                });
+
+                // 单个图表导出 PNG（包含标题）
+                document.querySelectorAll('.export-chart-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const chartId = this.getAttribute('data-chart-id');
+                        const canvas = document.getElementById(chartId);
+                        if (!canvas) return;
+
+                        const card = canvas.closest('.card');
+                        const titleSpan = card?.querySelector('.card-header span');
+                        const title = titleSpan ? titleSpan.innerText : '图表';
+                        const imgData = canvas.toDataURL('image/png');
+
+                        const tempDiv = document.createElement('div');
+                        tempDiv.style.backgroundColor = 'white';
+                        tempDiv.style.padding = '20px';
+                        tempDiv.style.borderRadius = '8px';
+                        tempDiv.style.display = 'inline-block';
+                        tempDiv.style.textAlign = 'center';
+                        tempDiv.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+
+                        const titleElem = document.createElement('h4');
+                        titleElem.style.marginBottom = '15px';
+                        titleElem.style.fontWeight = '600';
+                        titleElem.style.color = '#333';
+                        titleElem.innerText = title;
+                        tempDiv.appendChild(titleElem);
+
+                        const img = document.createElement('img');
+                        img.src = imgData;
+                        img.style.maxWidth = '100%';
+                        img.style.height = 'auto';
+                        img.style.border = '1px solid #eee';
+                        img.style.borderRadius = '4px';
+                        tempDiv.appendChild(img);
+
+                        document.body.appendChild(tempDiv);
+                        html2canvas(tempDiv, { scale: 2 }).then(captureCanvas => {
+                            const link = document.createElement('a');
+                            link.download = `${chartId}.png`;
+                            link.href = captureCanvas.toDataURL('image/png');
+                            link.click();
+                            document.body.removeChild(tempDiv);
+                        }).catch(err => {
+                            console.error('导出失败:', err);
+                            alert('导出失败，请重试或检查控制台。');
+                            document.body.removeChild(tempDiv);
+                        });
+                    });
+                });
+
+                // 全部导出为 PDF（干净拼接，无按钮，网格排列）
+                document.getElementById('exportAllPDF').addEventListener('click', function() {
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF('l', 'mm', 'a4'); // 横向 A4
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const margin = 10;
+                    const colCount = 2; // 每行两个
+                    const colWidth = (pageWidth - margin * (colCount + 1)) / colCount;
+                    const rowHeight = 140; // 估算每个图表的高度（包括标题），可根据实际调整
+
+                    // 收集所有可见图表的信息
+                    const visibleCharts = [];
+                    const chartInfos = [
+                        { id: 'chartTotalUsers', title: '总用户数' },
+                        { id: 'chartTotalQuestionnaires', title: '问卷总数' },
+                        { id: 'chartPublished', title: '已发布问卷' },
+                        { id: 'chartTotalResponses', title: '总回答数' }
+                    ];
+
+                    chartInfos.forEach(info => {
+                        const canvas = document.getElementById(info.id);
+                        if (!canvas) return;
+                        const container = canvas.closest('.chart-container');
+                        if (container && container.classList.contains('hidden')) return;
+                        visibleCharts.push(info);
+                    });
+
+                    if (visibleCharts.length === 0) {
+                        alert('没有可见的图表可供导出');
+                        return;
+                    }
+
+                    // 为每个图表创建临时干净容器并截图
+                    const tempDivs = [];
+                    const capturePromises = visibleCharts.map((info, index) => {
+                        const canvas = document.getElementById(info.id);
+                        const imgData = canvas.toDataURL('image/png');
+
+                        const tempDiv = document.createElement('div');
+                        tempDiv.style.backgroundColor = 'white';
+                        tempDiv.style.padding = '15px';
+                        tempDiv.style.borderRadius = '8px';
+                        tempDiv.style.display = 'inline-block';
+                        tempDiv.style.textAlign = 'center';
+                        tempDiv.style.width = '500px'; // 固定宽度以便截图清晰
+                        tempDiv.style.boxSizing = 'border-box';
+
+                        const titleElem = document.createElement('h4');
+                        titleElem.style.marginBottom = '10px';
+                        titleElem.style.fontWeight = '600';
+                        titleElem.style.color = '#333';
+                        titleElem.style.fontSize = '18px';
+                        titleElem.innerText = info.title;
+                        tempDiv.appendChild(titleElem);
+
+                        const img = document.createElement('img');
+                        img.src = imgData;
+                        img.style.width = '100%';
+                        img.style.height = 'auto';
+                        img.style.border = '1px solid #ddd';
+                        img.style.borderRadius = '4px';
+                        tempDiv.appendChild(img);
+
+                        document.body.appendChild(tempDiv);
+                        tempDivs.push(tempDiv);
+
+                        return html2canvas(tempDiv, { scale: 2 }).then(captureCanvas => {
+                            return {
+                                index,
+                                canvas: captureCanvas,
+                                width: captureCanvas.width,
+                                height: captureCanvas.height
+                            };
+                        });
+                    });
+
+                    Promise.all(capturePromises).then(results => {
+                        // 按原顺序排序
+                        results.sort((a, b) => a.index - b.index);
+
+                        // 计算每个图片在 PDF 中的尺寸
+                        const images = results.map(r => r.canvas);
+                        const imgWidth = colWidth;
+                        const imgHeights = images.map(img => (img.height * imgWidth) / img.width);
+
+                        let currentPage = 1;
+                        let currentY = margin;
+                        let currentCol = 0;
+
+                        images.forEach((img, i) => {
+                            const imgHeight = imgHeights[i];
+                            // 如果当前行放不下（超出页高），换页
+                            if (currentY + imgHeight > pageHeight - margin) {
+                                pdf.addPage();
+                                currentY = margin;
+                                currentCol = 0;
+                                currentPage++;
+                            }
+
+                            const x = margin + currentCol * (colWidth + margin);
+                            pdf.addImage(img, 'PNG', x, currentY, imgWidth, imgHeight);
+
+                            // 更新位置
+                            currentCol++;
+                            if (currentCol >= colCount) {
+                                currentCol = 0;
+                                currentY += imgHeight + margin;
+                            } else {
+                                // 同一行，y 不变，继续下一个图片
+                            }
+                        });
+
+                        pdf.save('系统统计趋势.pdf');
+                    }).catch(err => {
+                        console.error('PDF 导出失败:', err);
+                        alert('PDF 导出失败，请重试或检查控制台。');
+                    }).finally(() => {
+                        // 清理临时元素
+                        tempDivs.forEach(div => {
+                            if (document.body.contains(div)) {
+                                document.body.removeChild(div);
+                            }
+                        });
+                    });
+                });
+
+                // 自动隐藏 Toast 消息
+                setTimeout(function() {
+                    document.querySelectorAll('.toast.show').forEach(function(toast) {
+                        var bsToast = new bootstrap.Toast(toast);
+                        bsToast.hide();
+                    });
+                }, 5000);
+                document.querySelectorAll('.toast .btn-close').forEach(function(closeBtn) {
+                    closeBtn.addEventListener('click', function() {
+                        var toast = this.closest('.toast');
+                        var bsToast = new bootstrap.Toast(toast);
+                        bsToast.hide();
+                    });
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

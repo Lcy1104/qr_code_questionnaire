@@ -1,0 +1,125 @@
+/* 问卷通知样式 */
+.questionnaire-update-notification {
+    animation: slideIn 0.3s ease-out;
+}
+
+.questionnaire-update-notification.fade-out {
+    animation: fadeOut 0.3s ease-out forwards;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+
+/* 通知系统样式 */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    min-width: 300px;
+    max-width: 400px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1060;
+    overflow: hidden;
+    animation: notificationSlideIn 0.3s ease-out;
+}
+
+.notification.fade-out {
+    animation: notificationFadeOut 0.3s ease-out forwards;
+}
+
+.notification-content {
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.notification.notification-success {
+    border-left: 4px solid #28a745;
+    background: linear-gradient(to right, #f8fff9, white);
+}
+
+.notification.notification-warning {
+    border-left: 4px solid #ffc107;
+    background: linear-gradient(to right, #fffbf0, white);
+}
+
+.notification.notification-error {
+    border-left: 4px solid #dc3545;
+    background: linear-gradient(to right, #fff5f5, white);
+}
+
+.notification.notification-info {
+    border-left: 4px solid #17a2b8;
+    background: linear-gradient(to right, #f0f9ff, white);
+}
+
+.notification-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 0 8px;
+    line-height: 1;
+}
+
+.notification-close:hover {
+    color: #343a40;
+}
+
+@keyframes notificationSlideIn {
+    from {
+        transform: translateY(-20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes notificationFadeOut {
+    from {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .questionnaire-update-notification {
+        left: 10px;
+        right: 10px;
+        max-width: none;
+    }
+
+    .notification {
+        left: 10px;
+        right: 10px;
+        max-width: none;
+    }
+}

@@ -1,0 +1,248 @@
+<!-- templates/questionnaire/manage.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>管理问卷 - {{ questionnaire.title }}</title>
+    <style>
+        .status { padding: 5px 10px; border-radius: 5px; color: white; }
+        .draft { background: gray; }
+        .published { background: green; }
+        .closed { background: red; }
+    </style>
+</head>
+<body>
+    <div class="card mb-3">
+        <div class="card-body">
+            <form id="filterForm" class="row g-2 align-items-center">
+                <!-- 状态 -->
+                <div class="col-auto">
+                    <label class="form-label mb-0">状态</label>
+                    <select name="status" class="form-select form-select-sm">
+                        <option value="">全部</option>
+                        <option value="draft" {% if request.GET.status == 'draft' %}selected{% endif %}>草稿</option>
+                        <option value="published" {% if request.GET.status == 'published' %}selected{% endif %}>已发布</option>
+                        <option value="closed" {% if request.GET.status == 'closed' %}selected{% endif %}>已关闭</option>
+                    </select>
+                </div>
+                
+                <!-- 有无邀请码 -->
+                <div class="col-auto">
+                    <label class="form-label mb-0">邀请码</label>
+                    <select name="has_invite" class="form-select form-select-sm">
+                        <option value="">全部</option>
+                        <option value="1" {% if request.GET.has_invite == '1' %}selected{% endif %}>有</option>
+                        <option value="0" {% if request.GET.has_invite == '0' %}selected{% endif %}>无</option>
+                    </select>
+                </div>
+                
+                <!-- 有无回答 -->
+                <div class="col-auto">
+                    <label class="form-label mb-0">回答</label>
+                    <select name="has_response" class="form-select form-select-sm">
+                        <option value="">全部</option>
+                        <option value="1" {% if request.GET.has_response == '1' %}selected{% endif %}>有回答</option>
+                        <option value="0" {% if request.GET.has_response == '0' %}selected{% endif %}>无回答</option>
+                    </select>
+                </div>
+                
+                <div class="col-auto">
+                    <button class="btn btn-sm btn-outline-primary">筛选</button>
+                </div>
+            </form>
+            
+            <!-- 批量按钮 -->
+            <div class="mt-3 d-none" id="batchBar">
+                <button id="batchPublish" class="btn btn-sm btn-success">批量发布</button>
+                <button id="batchDelete" class="btn btn-sm btn-danger">批量删除</button>
+                <span class="ms-2 text-muted">已选 <span id="selectedCount">0</span> 项</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 问卷列表（复选框版） -->
+    <table class="table table-sm align-middle">
+        <thead>
+        <tr>
+            <th><input type="checkbox" id="checkAll"></th>
+            <th>标题</th>
+            <th>状态</th>
+            <th>邀请码</th>
+            <th>回答数</th>
+            <th>操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for q in questionnaires %}
+            <tr data-id="{{ q.id }}">
+                <td><input type="checkbox" class="row-check" value="{{ q.id }}"></td>
+                <td><a href="{% url 'questionnaire_detail' q.id %}">{{ q.title }}</a></td>
+                <td><span class="badge bg-{% if q.status == 'published' %}success{% elif q.status == 'closed' %}danger{% else %}secondary{% endif %}">{{ q.get_status_display }}</span></td>
+                <td>{{ q.invite_code|default:"-" }}</td>
+                <td>{{ q.response_count }}</td>
+                <td>
+                    {% if q.status == 'draft' %}
+                        <button class="btn btn-xs btn-outline-success pub-single" data-id="{{ q.id }}">发布</button>
+                    {% endif %}
+                </td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="6" class="text-center text-muted">暂无问卷</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- 轮询结果用 -->
+    <div id="taskResult" class="alert alert-info d-none"></div>
+    <h1>{{ questionnaire.title }}</h1>
+    
+    <div class="status {{ questionnaire.status }}">
+        状态：{{ questionnaire.get_status_display }}
+    </div>
+    
+    <p>{{ questionnaire.description }}</p>
+    
+    <h3>操作</h3>
+    <div>
+        {% if questionnaire.status == 'draft' %}
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="publish">
+            <button type="submit">发布问卷</button>
+        </form>
+        {% endif %}
+        
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="generate_qrcode">
+            <button type="submit">生成二维码</button>
+        </form>
+        
+        <a href="{{ survey_url }}" target="_blank">预览问卷</a>
+    </div>
+    
+    {% if qr_code_url %}
+    <div>
+        <h4>二维码</h4>
+        <img src="{{ qr_code_url }}" alt="二维码" width="200">
+        <p>扫描此二维码填写问卷</p>
+    </div>
+    {% endif %}
+    <div>
+    <h4>问卷信息</h4>
+    <p>状态：{{ questionnaire.get_status_display }}</p>
+    <p>访问权限：{{ questionnaire.get_access_type_display }}</p>
+    
+    {% if questionnaire.access_type == 'invite_only' %}
+    <p>邀请码：<strong>{{ questionnaire.invite_code }}</strong></p>
+    <p>分享链接：{{ request.build_absolute_uri }}/survey/{{ questionnaire.uuid }}/</p>
+    {% endif %}
+    </div>
+    <!-- 状态管理 -->
+    {% if questionnaire.status == 'published' %}
+        <form method="post" class="d-inline">{% csrf_token %}
+            <input type="hidden" name="action" value="close">
+            <button class="btn btn-warning btn-sm">终止问卷</button>
+        </form>
+    {% elif questionnaire.status == 'closed' %}
+        <form method="post" class="d-inline">{% csrf_token %}
+            <input type="hidden" name="action" value="reopen">
+            <button class="btn btn-info btn-sm">继续问卷</button>
+        </form>
+    {% endif %}
+
+    <!-- 二维码 -->
+    {% if questionnaire.qr_code %}
+        <h5>二维码</h5>
+        <a href="{{ questionnaire.qr_code.url }}" target="_blank">
+            <img src="{{ questionnaire.qr_code.url }}" width="200" class="border">
+        </a>
+        <p class="small text-muted">右键另存为可下载</p>
+    {% endif %}
+
+    <!-- 统计双视图 -->
+    {% if stats %}
+    <!-- 图表 -->
+    {% for chart in stats.charts %}
+        <h6>{{ chart.title }}</h6>
+        <img src="data:image/png;base64,{{ chart.img_base64 }}" class="mb-3">
+    {% endfor %}
+
+    <!-- 文本表格 -->
+    <table class="table table-sm">
+        <thead><tr><th>题号</th><th>题干</th><th>填写者</th><th>答案</th></tr></thead>
+        <tbody>
+        {% for row in stats.table %}
+            {% for a in row.answers %}
+                <tr>
+                    <td>{{ forloop.parentloop.counter }}</td>
+                    <td>{{ row.q_text|slice:":30" }}</td>
+                    <td>{{ a.user }}</td>
+                    <td>{{ a.answer }}</td>
+                </tr>
+            {% endfor %}
+        {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    <div>
+        <h4>统计信息</h4>
+        <p>创建时间：{{ questionnaire.created_at|date:"Y-m-d H:i" }}</p>
+        <p>填写人数：{{ response_count }}</p>
+    </div>
+    
+    <a href="{% url 'dashboard' %}">返回仪表盘</a>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        /* 批量复选框逻辑 */
+        $('#checkAll').on('change', function() {
+            $('.row-check').prop('checked', this.checked);
+            toggleBatchBar();
+        });
+        $(document).on('change', '.row-check', toggleBatchBar);
+        function toggleBatchBar() {
+            const n = $('.row-check:checked').length;
+            $('#selectedCount').text(n);
+            $('#batchBar').toggleClass('d-none', n === 0);
+        }
+        /* 单条/批量发布 */
+        function sendAction(action, ids) {
+            $.ajax({
+                url: '{% url "ajax_batch_operate" %}', 
+                type: 'POST', 
+                data: {action: action, ids: JSON.stringify(ids)}, 
+                headers: {'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()}, 
+                success: function(res) {
+                    $('#taskResult').removeClass('d-none').text(res.message || '任务已提交，请稍候…');
+                    if (res.task_id) pollResult(res.task_id);
+                }
+            });
+        }
+        $('#batchPublish').click(() => sendAction('publish', checkedIds()));
+        $('#batchDelete').click(() => {
+            if (confirm('确定删除？')) sendAction('delete', checkedIds());
+        });
+        $(document).on('click', '.pub-single', function() {
+            sendAction('publish', [$(this).data('id')]);
+        });
+        
+        function checkedIds() {
+            return $('.row-check:checked').map(function() { return $(this).val(); }).get();
+        }
+        
+        /* 轮询任务结果 */
+        function pollResult(taskId) {
+            const t = setInterval(function() {
+                $.get('{% url "ajax_task_result" %}?task_id=' + taskId, function(res) {
+                    if (res.status === 'SUCCESS') {
+                        clearInterval(t);
+                        location.reload();          // 完成后刷新
+                    } else if (res.status === 'FAILURE') {
+                        clearInterval(t);
+                        alert('任务失败：' + res.error);
+                    }
+                });
+                }, 1000);
+        }
+    </script>
+</body>
+</html>

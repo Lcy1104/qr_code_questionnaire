@@ -1,0 +1,1410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ questionnaire.title }} - 详情</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .delete-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+        }
+        .update-notification {
+            animation: slideInDown 0.5s ease-out;
+        }
+        @keyframes slideInDown {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        .update-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+        }
+        .copy-success {
+            color: #28a745;
+            font-size: 0.875rem;
+            margin-top: 5px;
+            display: none; /* 默认隐藏 */
+        }
+        .copy-link-container {
+            position: relative;
+        }
+        .link-input-group {
+            margin-bottom: 5px;
+        }
+        .link-label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 5px;
+            color: #495057;
+        }
+        /* 通知徽章样式 */
+        .notification-badge {
+            font-size: 0.7rem;
+            padding: 0.2rem 0.5rem;
+            position: absolute;
+            top: -5px;
+            right: -5px;
+        }
+        .notification-indicator {
+            position: relative;
+            display: inline-block;
+        }
+        /* 实时通知容器 */
+        .real-time-notifications {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1050;
+            max-width: 350px;
+        }
+        span.badge.bg-success { background-color: #198754 !important; color: #fff; }
+span.badge.bg-warning { background-color: #ffc107 !important; color: #000; }
+span.badge.bg-secondary { background-color: #6c757d !important; color: #fff; }
+span.badge.bg-danger { background-color: #dc3545 !important; color: #fff; }
+span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    {% include 'navbar.html' %}
+
+    <!-- 实时通知容器 -->
+    <div class="real-time-notifications" id="realTimeNotifications"></div>
+
+    <!-- 问卷更新通知 -->
+    <div id="update-notification" class="container mt-3" style="display: none;">
+        <div class="alert alert-warning update-notification">
+            <div class="d-flex align-items-center">
+                <i class="fas fa-exclamation-triangle me-3"></i>
+                <div class="flex-grow-1">
+                    <h6 class="mb-1">问卷已更新</h6>
+                    <p class="mb-2" id="update-message"></p>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <small class="text-muted" id="version-info"></small>
+                        <div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary me-1" onclick="remindLater()">
+                                稍后
+                            </button>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="acknowledgeUpdate()" id="acknowledge-btn">
+                                知道了
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" onclick="dismissNotification()" aria-label="关闭"></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <div>
+                            <h4 class="mb-0">{{ questionnaire.title }}</h4>
+                            <!-- 通知快速入口 -->
+                            {% if notification_unread_count > 0 %}
+                            <div class="mt-2">
+                                <a href="{% url 'notification_list' %}" class="btn btn-sm btn-outline-danger">
+                                    <i class="fas fa-bell me-1"></i>
+                                    您有 {{ notification_unread_count }} 条未读通知
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+                        
+                        {% if questionnaire.creator == request.user or request.user.is_admin %}
+                        <div class="btn-group">
+                            <!-- 删除问卷按钮 -->
+                            <button type="button" class="btn btn-danger btn-sm" data-bs-toggle="modal" data-bs-target="#deleteModal{{ questionnaire.id }}">
+                                <i class="fas fa-trash"></i> 删除问卷
+                            </button>
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="card-body">
+                        {% if questionnaire.description %}
+                        <p class="card-text">{{ questionnaire.description }}</p>
+                        <hr>
+                        {% endif %}
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <p><strong>状态:</strong>
+                                    <span class="badge {% if questionnaire.status == 'published' %}bg-success{% elif questionnaire.status == 'draft' %}bg-warning{% else %}bg-secondary{% endif %}">
+                                        {{ questionnaire.get_status_display }}
+                                    </span>
+                                </p>
+                                <p><strong>访问权限:</strong> {{ questionnaire.get_access_type_display }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>创建者:</strong> {{ questionnaire.creator.username }}</p>
+                                <p><strong>创建时间:</strong> {{ questionnaire.created_at|date:"Y-m-d H:i" }}</p>
+                            </div>
+                        </div>
+
+                        <!-- 按钮组 -->
+                        <div class="d-flex gap-2 mb-4 flex-wrap">
+                            {% if questionnaire.creator == request.user or is_admin %}
+                            <a href="{% url 'edit_questionnaire' questionnaire.id %}" class="btn btn-primary">
+                                <i class="fas fa-edit me-1"></i>编辑问卷
+                            </a>
+                            {% endif %}
+
+                            <!-- 发布按钮 - 只对草稿状态的问卷显示 -->
+                            {% if questionnaire.status == 'draft' %}
+                                {% if questionnaire.creator == request.user or is_admin %}
+                                <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#publishModal">
+                                    <i class="fas fa-paper-plane me-1"></i>发布问卷
+                                </button>
+                                {% endif %}
+                            {% endif %}
+
+                            {% if questionnaire.enable_multi_qrcodes %}
+    {% if user_has_submitted %}
+        <!-- 用户已提交：禁用按钮，提示已填写 -->
+        <button class="btn btn-secondary" disabled
+                title="您已填写过此问卷" id="fill-questionnaire-btn">
+            <i class="fas fa-play-circle me-1"></i>填写问卷
+        </button>
+    {% elif has_available_qrcode %}
+        <!-- 未提交且有可用二维码：可点击 -->
+        <a href="{% url 'survey_form' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
+            <i class="fas fa-play-circle me-1"></i>填写问卷
+        </a>
+    {% else %}
+        <!-- 未提交但无可用二维码：禁用按钮，提示无二维码 -->
+        <button class="btn btn-secondary" disabled
+                title="当前无可用的二维码，无法填写" id="fill-questionnaire-btn">
+            <i class="fas fa-play-circle me-1"></i>填写问卷
+        </button>
+    {% endif %}
+{% else %}
+    <!-- 未启用多二维码：直接可点击 -->
+    <a href="{% url 'survey_form' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
+        <i class="fas fa-play-circle me-1"></i>填写问卷
+    </a>
+{% endif %}
+                            
+                            <!-- 通知中心按钮 -->
+                            <a href="{% url 'notification_list' %}" class="btn btn-outline-info">
+                                <i class="fas fa-bell me-1"></i>通知中心
+                                {% if notification_unread_count > 0 %}
+                                    <span class="badge bg-danger ms-1">{{ notification_unread_count }}</span>
+                                {% endif %}
+                            </a>
+                            
+                            <!-- 问卷分析按钮 -->
+                            <a href="{% url 'questionnaire_analytics' questionnaire.id %}" class="btn btn-outline-warning">
+                                <i class="fas fa-chart-bar me-1"></i>查看分析
+                            </a>
+                        </div>
+
+                        <!-- 最近通知提示 -->
+                        {% if recent_notifications %}
+                        <div class="alert alert-light border mb-4">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-bell text-primary me-3"></i>
+                                <div class="flex-grow-1">
+                                    <h6 class="mb-1">最近通知</h6>
+                                    <div class="small">
+                                        {% for notification in recent_notifications|slice:":2" %}
+                                        <div class="mb-1">
+                                            <a href="{% url 'notification_detail' notification.id %}" 
+                                               class="text-decoration-none">
+                                                {{ notification.title|truncatechars:50 }}
+                                            </a>
+                                            <small class="text-muted ms-2">{{ notification.time_since }}</small>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                <div>
+                                    <a href="{% url 'notification_list' %}" class="btn btn-sm btn-outline-primary">
+                                        查看更多
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <h5 class="mb-3">问卷问题</h5>
+                        {% if questions %}
+                        <div class="list-group">
+                            {% for question in questions %}
+                            <div class="list-group-item">
+                                <div class="d-flex w-100 justify-content-between align-items-center">
+                                    <h6 class="mb-1">{{ forloop.counter }}. {{ question.text }}</h6>
+                                    <div class="d-flex align-items-center">
+                                        <small class="text-muted me-3">{{ question.get_question_type_display }}</small>
+                                        {% if question.answer_items.count > 0 %}
+                                            <!-- 回答数量提示 -->
+                                            <span class="badge bg-warning me-2" title="此问题已有回答记录">
+                                                {{ question.answer_set.count }} 个回答
+                                            </span>
+                                        {% endif %}
+                                        <!-- 版本历史链接 -->
+                                        <a href="{% url 'question_version_history' question.id %}"  
+                                           class="btn btn-sm btn-outline-info" 
+                                           title="查看版本历史">
+                                            <i class="fas fa-history"></i>
+                                        </a>
+                                    </div>
+                                </div>
+                                {% if question.question_type in 'radio,checkbox' and question.options %}
+                                <div class="mt-2">
+                                    <small class="text-muted">选项:</small>
+                                    <div class="mt-1">
+                                        {% for option in question.options %}
+                                        <div class="form-check">
+                                            {% if question.question_type == 'radio' %}
+                                            <input class="form-check-input" type="radio" disabled>
+                                            {% else %}
+                                            <input class="form-check-input" type="checkbox" disabled>
+                                            {% endif %}
+                                            <label class="form-check-label">{{ option }}</label>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                                {% elif question.question_type == 'text' %}
+                                <div class="mt-2">
+                                    <textarea class="form-control" rows="2" placeholder="简答题回答区域" disabled></textarea>
+                                    {% if question.max_length > 0 %}
+                                    <small class="text-muted">字数限制: {{ question.max_length }}字</small>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                <div class="mt-2">
+                                    <small class="text-muted">{% if question.required %}必填{% else %}选填{% endif %}</small>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="alert alert-warning">暂无问题</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧统计信息 -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">统计信息</h5>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>访问次数:</strong> {{ questionnaire.view_count }}</p>
+                        <p><strong>提交次数:</strong> <span id="submit-count">{{ questionnaire.submit_count }}</span></p>
+                            {% if questionnaire.limit_responses %}
+                                / {{ questionnaire.max_responses }}
+                            {% endif %}
+                        </p>
+                        <!-- 新增开始时间 -->
+                        <p><strong>开始时间:</strong>
+                            {% if questionnaire.start_time %}
+                                {{ questionnaire.start_time|date:"Y-m-d H:i" }}
+                            {% else %}
+                                <span class="text-muted">立即开始</span>
+                            {% endif %}
+                        </p>
+                        <!-- 新增截止时间 -->
+                        <p><strong>截止时间:</strong>
+                            {% if questionnaire.end_time %}
+                                {{ questionnaire.end_time|date:"Y-m-d H:i" }}
+                            {% else %}
+                                <span class="text-muted">永不结束</span>
+                            {% endif %}
+                        </p>
+                        <!-- 新增提交限制 -->
+                        <p><strong>提交限制:</strong>
+                            {% if questionnaire.limit_responses %}
+                                最多 {{ questionnaire.max_responses }} 份
+                            {% else %}
+                                <span class="text-muted">不限制</span>
+                            {% endif %}
+                        </p>
+                        <p><strong>问卷状态:</strong>
+                            <span class="badge {% if questionnaire.status == 'published' %}bg-success{% elif questionnaire.status == 'draft' %}bg-warning{% else %}bg-secondary{% endif %}">
+                                {{ questionnaire.get_status_display }}
+                            </span>
+                            {% if questionnaire.status == 'published' %}
+                                {% if questionnaire.end_time and questionnaire.end_time < now %}
+                                    <span class="badge bg-secondary ms-1">已截止</span>
+                                {% elif questionnaire.start_time and questionnaire.start_time > now %}
+                                    <span class="badge bg-info ms-1">未开始</span>
+                                {% endif %}
+                            {% endif %}
+                        </p>
+                        <p><strong>版本:</strong>
+                            <span class="badge bg-info update-badge">v{{ questionnaire.version }}</span>
+                            {% if questionnaire.status == 'modified' %}
+                                <span class="badge bg-warning update-badge ms-1">已更新</span>
+                            {% endif %}
+                        </p>
+                        <hr>
+                        <div class="text-center">
+                            <h6>问卷信息</h6>
+                            {% if questionnaire.access_type == 'invite' %}
+                                {% if questionnaire.creator == request.user or is_admin %}
+                                    <div class="mb-2">
+                                        <button type="button" class="btn btn-sm btn-outline-primary"
+                                                onclick="toggleInviteCode()" id="inviteCodeBtn">
+                                            点击显示邀请码
+                                        </button>
+                                    </div>
+                                    <div id="inviteCodeContainer" style="display: none;">
+                                        <div class="input-group input-group-sm mb-2">
+                                            <input type="text" class="form-control text-center"
+                                                   id="inviteCodeInput"
+                                                   value="{{ questionnaire.invite_code }}" readonly>
+                                            <button class="btn btn-outline-secondary" type="button"
+                                                    onclick="copyInviteCode()">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </div>
+                                        <p class="small text-muted">仅限被邀请用户使用</p>
+                                    </div>
+                                {% else %}
+                                    <p class="text-muted small">此问卷需要邀请码才能访问</p>
+                                {% endif %}
+                            {% endif %}
+                            
+                            <!-- 二维码区域：根据是否启用多二维码显示不同内容 -->
+                            {% if questionnaire.enable_multi_qrcodes %}
+                                <!-- 多二维码列表 -->
+<hr>
+<div class="text-center">
+    <h6>一次性二维码（共 {{ questionnaire.qrcodes.count }} 个）</h6>
+    <div style="max-height: 400px; overflow-y: auto;" class="mt-2">
+        {% for qrcode in questionnaire.qrcodes.all %}
+            <div class="mb-3 p-2 border
+                {% if qrcode.is_used %}bg-light text-muted
+                {% elif qrcode.is_shared %}bg-info bg-opacity-10
+                {% endif %}"
+                style="border-radius: 8px;"
+                data-qrcode-id="{{ qrcode.qr_code_id }}">
+                <div class="d-flex align-items-center">
+                    <!-- 动态生成的二维码图片 -->
+                    <img src="{% url 'get_qrcode_image' qrcode.qr_code_id %}" alt="二维码"
+                         style="width: 80px; height: 80px; margin-right: 15px;">
+
+                    <div class="text-start" style="flex:1;">
+                        <!-- 状态标签 -->
+                        <p class="mb-1 qr-status">
+                            状态:
+                            {% if qrcode.is_used %}
+                                <span class="badge bg-secondary">已使用</span>
+                                {% if qrcode.used_at %}
+                                    <br><small>{{ qrcode.used_at|date:"Y-m-d H:i" }}</small>
+                                {% endif %}
+                            {% elif questionnaire.end_time and questionnaire.end_time < now and not qrcode.is_used %}
+                                <!-- 问卷已截止且二维码未使用 -->
+                                <span class="badge bg-dark">已过期</span>
+                            {% elif qrcode.is_shared %}
+                                <span class="badge bg-info">已共享</span>
+                            {% else %}
+                                <span class="badge bg-success">可用</span>
+                            {% endif %}
+                        </p>
+
+                        <!-- 按钮组 -->
+                        <div class="d-flex gap-2 qr-buttons">
+                            {% if qrcode.is_used %}
+                                <!-- 已使用：只显示“查看填写情况”按钮 -->
+                                {% with response=qrcode.responses.first %}
+                                    {% if response %}
+                                        <a href="{% url 'response_detail' response.id %}"
+                                           class="btn btn-sm btn-outline-info">
+                                            <i class="fas fa-eye me-1"></i>查看填写情况
+                                        </a>
+                                    {% endif %}
+                                {% endwith %}
+                            {% elif questionnaire.end_time and questionnaire.end_time < now and not qrcode.is_used %}
+                                <!-- 已过期：不显示任何操作按钮 -->
+                                <span class="text-muted small">已过期，无法使用</span>
+                            {% else %}
+                                <!-- 可用或已共享：显示复制链接和下载图片两个按钮 -->
+                                <button class="btn btn-sm btn-outline-secondary copy-link-btn"
+                                        data-link="{{ request.scheme }}://{{ request.get_host }}{% url 'qrcode_access' qrcode.qr_code_id %}"
+                                        data-qrcode-id="{{ qrcode.qr_code_id }}">
+                                    <i class="fas fa-link me-1"></i>复制链接
+                                </button>
+                                <a href="{% url 'get_qrcode_image' qrcode.qr_code_id %}"
+                                   download="qrcode_{{ qrcode.qr_code_id }}.png"
+                                   class="btn btn-sm btn-outline-primary download-link-btn"
+                                   data-qrcode-id="{{ qrcode.qr_code_id }}">
+                                    <i class="fas fa-download me-1"></i>下载图片
+                                </a>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% empty %}
+            <p class="text-muted">暂无二维码</p>
+        {% endfor %}
+    </div>
+</div>
+                            {% elif questionnaire.qr_code %}
+                                <!-- 原有单二维码区域（保持不变） -->
+                                <hr>
+                                <div class="text-center">
+                                    <h6>问卷二维码</h6>
+                                    <img src="{{ questionnaire.qr_code.url }}" alt="二维码" class="img-fluid mb-2" style="max-width: 150px;">
+                                    <p class="small text-muted">扫描二维码访问问卷</p>
+                                    <!-- 原有复制链接按钮等保持不变 -->
+                                    <div class="copy-link-container">
+                                        <div class="link-label">问卷链接：</div>
+                                        <div class="input-group input-group-sm link-input-group">
+                                            <input type="text" class="form-control"
+                                                   id="questionnaire-link"
+                                                   value="{{ request.scheme }}://{{ request.get_host }}{% url 'survey_landing' questionnaire.id %}"
+                                                   readonly>
+                                            <button class="btn btn-outline-primary" type="button"
+                                                    onclick="copyQuestionnaireLink()"
+                                                    title="复制链接">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                        </div>
+                                        <div class="copy-success" id="copy-success" style="display: none;">
+                                            <i class="fas fa-check-circle me-1"></i>链接已复制到剪贴板
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endif %}
+
+                        </div>
+                        <hr>
+                        
+                        <!-- 通知相关链接 -->
+                        <div class="mb-3">
+                            <h6>通知相关</h6>
+                            <div class="d-grid gap-2">
+                                <a href="{% url 'notification_list' %}" class="btn btn-sm btn-outline-info">
+                                    <i class="fas fa-list me-1"></i>查看所有通知
+                                </a>
+                                <a href="{% url 'notification_settings' %}" class="btn btn-sm btn-outline-secondary">
+                                    <i class="fas fa-cog me-1"></i>通知设置
+                                </a>
+                                {% if notification_unread_count > 0 %}
+                                <button class="btn btn-sm btn-outline-success" onclick="markAllAsRead()">
+                                    <i class="fas fa-check-double me-1"></i>标记所有为已读
+                                </button>
+                                {% endif %}
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <h6>最近回答</h6>
+                        {% if responses %}
+                        <div class="list-group list-group-flush">
+                            {% for response in responses|slice:":5" %}
+                            <div class="list-group-item px-0">
+                                <small>
+                                    {{ response.user.username }} -
+                                    {{ response.submitted_at|date:"m-d H:i" }}
+                                    {% if response.needs_update %}
+                                    <span class="badge bg-warning update-badge ms-1">需更新</span>
+                                    {% endif %}
+                                </small>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="text-muted small">暂无回答</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 发布问卷模态框 -->
+    <div class="modal fade" id="publishModal" tabindex="-1" aria-labelledby="publishModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <form id="publishForm" method="post" action="{% url 'ajax_publish_questionnaire' questionnaire.id %}">
+                    {% csrf_token %}
+                    <div class="modal-header bg-warning text-white">
+                        <h5 class="modal-title" id="publishModalLabel">
+                            <i class="fas fa-paper-plane me-2"></i>发布问卷
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
+                    </div>
+                    <div class="modal-body">
+                        <!-- 验证提示 -->
+                        <div class="alert alert-info mb-3">
+                            <i class="fas fa-info-circle me-2"></i>
+                            发布前系统会自动验证问卷内容是否完整
+                        </div>
+
+                        <!-- 访问权限设置 -->
+                        <div class="mb-3">
+                            <label for="accessType" class="form-label">访问权限</label>
+                            <select class="form-select" id="accessType" name="access_type" required>
+                                <option value="public" {% if questionnaire.access_type == 'public' %}selected{% endif %}>公开 - 任何人都可以填写</option>
+                                <option value="private" {% if questionnaire.access_type == 'private' %}selected{% endif %}>私有 - 需要登录才能填写</option>
+                                <option value="invite" {% if questionnaire.access_type == 'invite' %}selected{% endif %}>仅邀请 - 需要邀请码才能填写</option>
+                            </select>
+                            <div class="form-text">
+                                选择问卷的访问方式，发布后可以修改
+                            </div>
+                        </div>
+
+                        <!-- 邀请码设置（根据选择动态显示） -->
+                        <div class="mb-3" id="inviteCodeSection" style="display: none;">
+                            <label for="inviteCode" class="form-label">邀请码</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="inviteCode"
+                                       name="invite_code"
+                                       placeholder="留空则自动生成邀请码">
+                                <button type="button" class="btn btn-outline-secondary" onclick="generateInviteCode()">
+                                    <i class="fas fa-redo"></i> 生成
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                仅被邀请的用户可以使用此码访问问卷
+                            </div>
+                        </div>
+
+                        <!-- 验证结果区域 -->
+                        <div id="validationResults" class="mt-3" style="display: none;">
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                <span id="validationMessage">正在验证问卷内容...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="submit" class="btn btn-warning" id="publishButton">
+                            <span id="publishButtonText">
+                                <i class="fas fa-paper-plane me-1"></i>确认发布
+                            </span>
+                            <span id="publishLoading" style="display: none;">
+                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                                发布中...
+                            </span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除问卷模态框 -->
+    {% if questionnaire.creator == request.user or request.user.is_admin %}
+    <div class="modal fade" id="deleteModal{{ questionnaire.id }}" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">确认删除问卷</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>您确定要删除问卷 <strong>"{{ questionnaire.title }}"</strong> 吗？</p>
+                    <p class="text-danger">此操作不可恢复，问卷的所有问题和回答都将被删除！</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <form method="post" action="{% url 'delete_questionnaire' questionnaire.id %}?next={% url 'questionnaire_list' %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger">确认删除</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- 调试信息 -->
+<div style="display:none;">问题数量: {{ questions|length }}</div>
+<script>
+console.log("前端调试: 问题数量 =", {{ questions|length }});
+console.log("前端调试: has_available_qrcode =", {{ has_available_qrcode|yesno:"true,false" }});
+</script>
+
+    <script>
+    // ============ 问卷更新相关函数 ============
+    const questionnaireId = '{{ questionnaire.id }}';
+    const csrfToken = getCookie('csrftoken');
+    const checkUpdateUrl = "{% url 'check_questionnaire_update' questionnaire.id %}";
+    const acknowledgeUpdateUrl = "{% url 'acknowledge_update' questionnaire.id %}";
+    // 检查更新
+    function checkForUpdate() {
+        fetch(checkUpdateUrl, {
+            method: 'GET',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'  // 必须添加这个头
+        }
+    })
+    .then(response => {
+        if (response.status === 400) {
+            console.warn('检查更新失败：请求必须使用 AJAX');
+            return null;
+        }
+        if (!response.ok) {
+            throw new Error(`HTTP 错误! 状态: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data && data.has_update) {
+            showUpdateNotification(data);
+        }
+    })
+    .catch(error => {
+        console.error('检查更新失败:', error);
+    });
+}
+
+    // 显示更新通知
+function showUpdateNotification(data) {
+    const container = document.getElementById('update-notification');
+    const message = document.getElementById('update-message');
+    const versionInfo = document.getElementById('version-info');
+
+    // 修改：使用正确的字段名
+    if (data.update_info) {
+        message.textContent = data.update_info.update_message;
+        versionInfo.textContent = `版本 ${data.update_info.user_version} → ${data.update_info.current_version}`;
+    } else {
+        message.textContent = "问卷有更新";
+        versionInfo.textContent = "请查看最新版本";
+    }
+    
+    container.style.display = 'block';
+
+    // 10秒后自动隐藏
+    setTimeout(() => {
+        if (container.style.display !== 'none') {
+            dismissNotification();
+        }
+    }, 10000);
+}
+
+    // 关闭通知
+    function dismissNotification() {
+        document.getElementById('update-notification').style.display = 'none';
+    }
+
+    // 稍后提醒
+    function remindLater() {
+        dismissNotification();
+        // 5分钟后重新检查
+        setTimeout(checkForUpdate, 5 * 60 * 1000);
+    }
+
+    // 确认更新
+    function acknowledgeUpdate() {
+        const button = document.getElementById('acknowledge-btn');
+        const originalText = button.textContent;
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        fetch(acknowledgeUpdateUrl, {  
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success || data.status === 'success') {
+                dismissNotification();
+                showSuccessMessage('更新已确认');
+            } else {
+                button.disabled = false;
+                button.textContent = originalText;
+                alert('确认失败: ' + (data.message || '未知错误'));
+            }
+        })
+        .catch(error => {
+            console.error('确认更新失败:', error);
+            button.disabled = false;
+            button.textContent = originalText;
+            alert('确认失败，请重试');
+        });
+    }
+
+    // ============ 通知相关函数 ============
+    // 标记所有通知为已读
+    function markAllAsRead() {
+        if (!confirm('确定要标记所有通知为已读吗？')) return;
+        
+        fetch('/notifications/mark-all-read/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showSuccessMessage(data.message || '已标记所有通知为已读');
+                // 刷新页面以更新未读计数
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                alert('操作失败: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('标记所有通知为已读失败:', error);
+            alert('操作失败，请重试');
+        });
+    }
+
+    // 检查新通知（实时）
+    function checkNewNotifications() {
+        fetch('/notifications/unread-count/')
+            .then(response => response.json())
+            .then(data => {
+                if (data.unread_count > 0) {
+                    // 如果有新通知，可以显示一个提示
+                    if (window.lastUnreadCount === undefined) {
+                        window.lastUnreadCount = 0;
+                    }
+                    
+                    if (data.unread_count > window.lastUnreadCount) {
+                        // 新通知到达
+                        showNewNotificationAlert(data.unread_count - window.lastUnreadCount);
+                    }
+                    
+                    window.lastUnreadCount = data.unread_count;
+                }
+            })
+            .catch(error => {
+                console.error('检查新通知失败:', error);
+            });
+    }
+
+    // 显示新通知提醒
+    function showNewNotificationAlert(count) {
+        const container = document.getElementById('realTimeNotifications');
+        
+        const alertDiv = document.createElement('div');
+        alertDiv.className = 'alert alert-info alert-dismissible fade show';
+        alertDiv.style.cssText = 'animation: slideInDown 0.5s ease-out; margin-bottom: 10px;';
+        
+        alertDiv.innerHTML = `
+            <div class="d-flex align-items-center">
+                <i class="fas fa-bell fa-lg me-3"></i>
+                <div class="flex-grow-1">
+                    <h6 class="mb-1">新通知</h6>
+                    <p class="mb-0">您有 ${count} 条新通知</p>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-sm btn-primary" onclick="location.href='/notifications/'">
+                        查看
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" 
+                            onclick="this.closest('.alert').remove()">
+                        忽略
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        container.appendChild(alertDiv);
+        
+        // 5秒后自动消失
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.classList.remove('show');
+                setTimeout(() => {
+                    if (alertDiv.parentNode) {
+                        alertDiv.remove();
+                    }
+                }, 300);
+            }
+        }, 5000);
+    }
+
+    // ============ 工具函数 ============
+    
+    // 显示成功消息
+    function showSuccessMessage(msg) {
+        const existingAlert = document.querySelector('.success-alert');
+        if (existingAlert) {
+            existingAlert.remove();
+        }
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-success alert-dismissible fade show position-fixed';
+        alert.style.cssText = 'top: 20px; right: 20px; z-index: 1050; max-width: 300px;';
+        alert.innerHTML = `
+            <i class="fas fa-check-circle me-2"></i>${msg}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(alert);
+
+        setTimeout(() => {
+            if (alert.parentNode) {
+                alert.classList.remove('show');
+                setTimeout(() => {
+                    if (alert.parentNode) {
+                        alert.remove();
+                    }
+                }, 150);
+            }
+        }, 3000);
+    }
+
+    // 获取Cookie
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // ============ 原有的问卷相关函数 ============
+    
+    function toggleInviteCode() {
+        const container = document.getElementById('inviteCodeContainer');
+        const btn = document.getElementById('inviteCodeBtn');
+        if (container.style.display === 'none') {
+            container.style.display = 'block';
+            btn.textContent = '隐藏邀请码';
+        } else {
+            container.style.display = 'none';
+            btn.textContent = '点击显示邀请码';
+        }
+    }
+    
+    function copyInviteCode() {
+        const input = document.getElementById('inviteCodeInput');
+        input.select();
+        document.execCommand('copy');
+        showSuccessMessage('邀请码已复制到剪贴板');
+    }
+
+    function copyQuestionnaireLink() {
+        const linkInput = document.getElementById('questionnaire-link');
+        const copySuccess = document.getElementById('copy-success');
+        linkInput.select();
+        document.execCommand('copy');
+        copySuccess.style.display = 'block';
+        setTimeout(() => {
+            copySuccess.style.display = 'none';
+        }, 3000);
+        showSuccessMessage('问卷链接已复制到剪贴板');
+    }
+
+    // ============ 发布问卷相关函数 ============
+    
+    document.getElementById('accessType').addEventListener('change', function() {
+        const inviteCodeSection = document.getElementById('inviteCodeSection');
+        if (this.value === 'invite') {
+            inviteCodeSection.style.display = 'block';
+        } else {
+            inviteCodeSection.style.display = 'none';
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const accessTypeSelect = document.getElementById('accessType');
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+tooltipTriggerList.map(function (tooltipTriggerEl) {
+    return new bootstrap.Tooltip(tooltipTriggerEl);
+});
+        if (accessTypeSelect && accessTypeSelect.value === 'invite') {
+            document.getElementById('inviteCodeSection').style.display = 'block';
+        }
+        
+        // 页面加载后检查更新
+        setTimeout(checkForUpdate, 1000);
+        
+        // 每30秒检查一次新通知
+        setInterval(checkNewNotifications, 30000);
+        
+        // 立即检查一次新通知
+        checkNewNotifications();
+
+         const storedData = sessionStorage.getItem('questionnaire_data');
+    if (storedData) {
+        try {
+            const data = JSON.parse(storedData);
+            if (data.questionnaire_id === '{{ questionnaire.id }}') {
+                console.log('使用存储的数据渲染页面');
+                if (data.questions) updateQuestionsUI(data.questions);
+                if (data.has_available_qrcode !== undefined) {
+                    updateButtonUI(data.has_available_qrcode, data.user_has_submitted || false);
+                }
+                if (data.submit_count !== undefined) updateStatsUI(data.submit_count);
+                sessionStorage.removeItem('questionnaire_data');
+                window.__data_loaded_from_storage = true;
+                return; // 数据已加载，不再执行后续 fetch
+            }
+        } catch (e) {
+            console.error('解析存储数据失败', e);
+        }
+    }
+    // 如果没有存储数据，则通过 API 获取
+    fetchLatestData();
+    });
+    // WebSocket 连接（问卷二维码更新）
+(function() {
+    const questionnaireId = '{{ questionnaire.id }}';
+    const wsScheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${wsScheme}://${window.location.host}/ws/questionnaire/${questionnaireId}/`;
+    const ws = new WebSocket(wsUrl);
+    ws.onopen = function() {
+        console.log('WebSocket连接已建立，发送检查请求');
+        ws.send(JSON.stringify({
+            type: 'check_ready',
+            questionnaire_id: questionnaireId
+        }));
+    };
+     ws.onmessage = function(e) {
+    const data = JSON.parse(e.data);
+    console.log('收到WebSocket消息:', data);
+    if (data.type === 'qrcode_update') {
+        updateQRCodeUI(data.qr_code_id, data.is_used, data.used_by, data.used_at, data.response_id);
+    } else if (data.type === 'questionnaire_updated') {
+        // 无条件更新问题列表、按钮状态、统计信息
+        if (data.questions) {
+            console.log('更新问题列表，问题数量:', data.questions.length);
+            updateQuestionsUI(data.questions);
+        }
+        if (data.has_available_qrcode !== undefined) {
+            // 注意：user_has_submitted 可能不准确，用按钮当前状态
+            const fillBtn = document.getElementById('fill-questionnaire-btn');
+            const isSubmitted = fillBtn ? fillBtn.hasAttribute('disabled') : false;
+            updateButtonUI(data.has_available_qrcode, isSubmitted);
+        }
+        if (data.submit_count !== undefined) {
+            updateStatsUI(data.submit_count);
+        }
+    }
+};
+
+    ws.onerror = function(err) {
+        console.error('WebSocket error:', err);
+    };
+
+    function updateQRCodeUI(qrCodeId, isUsed, usedBy, usedAt, responseId) {
+        const qrDiv = document.querySelector(`[data-qrcode-id="${qrCodeId}"]`);
+        if (!qrDiv) return;
+
+        // 更新状态标签
+        const statusSpan = qrDiv.querySelector('.qr-status');
+        if (statusSpan) {
+            if (isUsed) {
+                statusSpan.innerHTML = '状态: <span class="badge bg-secondary">已使用</span>' +
+                    (usedAt ? `<br><small>${new Date(usedAt).toLocaleString()}</small>` : '');
+            }
+        }
+
+        // 更新按钮组
+        const btnGroup = qrDiv.querySelector('.qr-buttons');
+        if (btnGroup && isUsed) {
+            btnGroup.innerHTML = `<a href="/response/${responseId}/" class="btn btn-sm btn-outline-info">查看填写情况</a>`;
+        }
+    }
+})();
+
+    function generateInviteCode() {
+        const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let result = '';
+        for (let i = 0; i < 8; i++) {
+            result += characters.charAt(Math.floor(Math.random() * characters.length));
+        }
+        document.getElementById('inviteCode').value = result;
+    }
+
+    document.getElementById('publishForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const publishButton = document.getElementById('publishButton');
+        const publishButtonText = document.getElementById('publishButtonText');
+        const publishLoading = document.getElementById('publishLoading');
+        const validationResults = document.getElementById('validationResults');
+        const validationMessage = document.getElementById('validationMessage');
+
+        publishButton.disabled = true;
+        publishButtonText.style.display = 'none';
+        publishLoading.style.display = 'inline';
+
+        validationResults.style.display = 'block';
+        validationMessage.textContent = '正在验证问卷内容...';
+
+        const formData = new FormData(this);
+
+        fetch(this.action, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrfToken,
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showSuccessMessage('问卷已成功发布！');
+                window.location.href = "{% url 'questionnaire_detail' questionnaire.id %}?_=" + Date.now();
+            } else {
+                validationMessage.textContent = data.message || '发布失败，请检查问卷内容';
+                if (data.errors) {
+                    let errorList = '';
+                    if (Array.isArray(data.errors)) {
+                        errorList = '<ul class="mb-0 mt-2">' +
+                                   data.errors.map(error => `<li>${error}</li>`).join('') +
+                                   '</ul>';
+                    } else {
+                        for (const [field, errors] of Object.entries(data.errors)) {
+                            errorList += `<strong>${field}:</strong> ${errors.join(', ')}<br>`;
+                        }
+                    }
+                    validationMessage.innerHTML += '<br>' + errorList;
+                }
+                publishButton.disabled = false;
+                publishButtonText.style.display = 'inline';
+                publishLoading.style.display = 'none';
+            }
+        })
+        .catch(error => {
+            console.error('发布失败:', error);
+            validationMessage.textContent = '发布失败，请稍后重试';
+            publishButton.disabled = false;
+            publishButtonText.style.display = 'inline';
+            publishLoading.style.display = 'none';
+        });
+    });
+
+    function updatePageAfterPublish(data) {
+        const statusBadge = document.querySelector('.card-body .badge');
+        if (statusBadge) {
+            statusBadge.className = 'badge bg-success';
+            statusBadge.textContent = '已发布';
+        }
+
+        const versionBadge = document.querySelector('.update-badge');
+        if (versionBadge) {
+            versionBadge.textContent = `v${data.version}`;
+        }
+
+        const publishBtn = document.querySelector('button[data-bs-target="#publishModal"]');
+        if (publishBtn) {
+            publishBtn.remove();
+        }
+
+        if (data.qr_code_url) {
+            const qrContainer = document.querySelector('.col-md-4 .card .text-center');
+            if (qrContainer) {
+                qrContainer.innerHTML = `
+                    <h6>问卷二维码</h6>
+                    <img src="${data.qr_code_url}" alt="二维码" class="img-fluid mb-2" style="max-width: 150px;">
+                    <p class="small text-muted">扫描二维码访问问卷</p>
+                    <div class="copy-link-container">
+                        <div class="link-label">问卷链接：</div>
+                        <div class="input-group input-group-sm link-input-group">
+                            <input type="text" class="form-control"
+                                   id="questionnaire-link"
+                                   value="${data.survey_url}"
+                                   readonly>
+                            <button class="btn btn-outline-primary" type="button"
+                                    onclick="copyQuestionnaireLink()"
+                                    title="复制链接">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </div>
+                        <div class="copy-success" id="copy-success" style="display: none;">
+                            <i class="fas fa-check-circle me-1"></i>链接已复制到剪贴板
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        if (data.invite_code) {
+            const inviteCodeBtn = document.getElementById('inviteCodeBtn');
+            if (inviteCodeBtn) {
+                const container = document.getElementById('inviteCodeContainer');
+                const input = container.querySelector('#inviteCodeInput');
+                input.value = data.invite_code;
+                inviteCodeBtn.textContent = '点击显示邀请码';
+                container.style.display = 'none';
+            }
+        }
+    }
+  // 复制链接按钮点击事件
+document.querySelectorAll('.copy-link-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        const link = this.dataset.link;
+        const qrcodeId = this.dataset.qrcodeId;
+
+        fetch(`/api/qrcode/${qrcodeId}/share/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                // 更新状态标签
+                const statusSpan = document.querySelector(`[data-qrcode-id="${qrcodeId}"] .qr-status`);
+                if (statusSpan) {
+                    statusSpan.innerHTML = '状态: <span class="badge bg-info">已共享</span>';
+                }
+            }
+            return response;
+        })
+        .finally(() => {
+            // 复制链接
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(link).then(() => {
+                    alert('链接已复制到剪贴板');
+                }).catch(() => fallbackCopy(link));
+            } else {
+                fallbackCopy(link);
+            }
+        });
+    });
+});
+
+// 下载按钮点击事件（调用分享 API，不阻止默认下载）
+document.querySelectorAll('.download-link-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const qrcodeId = this.dataset.qrcodeId;
+        fetch(`/api/qrcode/${qrcodeId}/share/`, {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                const statusSpan = document.querySelector(`[data-qrcode-id="${qrcodeId}"] .qr-status`);
+                if (statusSpan) {
+                    statusSpan.innerHTML = '状态: <span class="badge bg-info">已共享</span>';
+                }
+            }
+        })
+        .catch(err => console.warn('标记分享失败', err));
+        // 不阻止默认下载
+    });
+});
+function fallbackCopy(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    alert('链接已复制到剪贴板');
+}
+// 获取最新数据并更新页面
+function fetchLatestData() {
+    fetch(`/api/questionnaires/${questionnaireId}/detail/`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // 更新问题列表
+                updateQuestionsUI(data.questions);
+                // 更新按钮状态
+                updateButtonUI(data.has_available_qrcode, data.user_has_submitted);
+                // 更新提交计数等统计信息
+                updateStatsUI(data.submit_count);
+            }
+        })
+        .catch(err => console.error('获取最新数据失败:', err));
+}
+
+// 更新问题列表区域
+function updateQuestionsUI(questions) {
+    console.log('【DEBUG】updateQuestionsUI 被调用，问题数量:', questions ? questions.length : 0);
+    if (!questions || !Array.isArray(questions) || questions.length === 0) {
+        console.warn('【DEBUG】没有有效的问题数据，无法更新');
+        return;
+    }
+
+    const parent = document.querySelector('.col-md-8 .card-body');
+    if (!parent) {
+        console.error('【DEBUG】找不到父容器 .col-md-8 .card-body');
+        return;
+    }
+
+    // 查找可能存在的“暂无问题”警告
+    const alertWarning = parent.querySelector('.alert.alert-warning');
+    if (alertWarning) {
+        console.log('【DEBUG】找到警告元素，准备替换');
+        // 创建新的列表容器
+        const container = document.createElement('div');
+        container.className = 'list-group';
+        // 生成 HTML
+        let html = '';
+        questions.forEach((q, index) => {
+            html += `<div class="list-group-item">`;
+            html += `<div class="d-flex w-100 justify-content-between align-items-center">`;
+            html += `<h6 class="mb-1">${index + 1}. ${q.text}</h6>`;
+            html += `<div class="d-flex align-items-center">`;
+            html += `<small class="text-muted me-3">${getQuestionTypeDisplay(q.question_type)}</small>`;
+            html += `</div></div>`;
+
+            if (q.question_type === 'radio' || q.question_type === 'checkbox') {
+                html += `<div class="mt-2"><small class="text-muted">选项:</small><div class="mt-1">`;
+                let options = q.options;
+                if (typeof options === 'string') {
+                    try { options = JSON.parse(options); } catch (e) { options = []; }
+                }
+                if (!Array.isArray(options)) options = [];
+                options.forEach(opt => {
+                    html += `<div class="form-check">`;
+                    html += `<input class="form-check-input" type="${q.question_type}" disabled>`;
+                    html += `<label class="form-check-label">${opt}</label>`;
+                    html += `</div>`;
+                });
+                html += `</div></div>`;
+            } else if (q.question_type === 'text') {
+                html += `<div class="mt-2"><textarea class="form-control" rows="2" placeholder="简答题回答区域" disabled></textarea>`;
+                if (q.max_length > 0) {
+                    html += `<small class="text-muted">字数限制: ${q.max_length}字</small>`;
+                }
+                html += `</div>`;
+            }
+
+            html += `<div class="mt-2"><small class="text-muted">${q.required ? '必填' : '选填'}</small></div>`;
+            html += `</div>`;
+        });
+        container.innerHTML = html;
+        // 替换警告元素
+        parent.replaceChild(container, alertWarning);
+        console.log('【DEBUG】替换完成');
+    } else {
+        // 如果没有警告，可能是已经有列表容器，直接更新
+        let container = parent.querySelector('.list-group');
+        if (!container) {
+            // 如果还没有列表容器，创建一个
+            container = document.createElement('div');
+            container.className = 'list-group';
+            parent.appendChild(container);
+        }
+        // 更新内容
+        let html = '';
+        questions.forEach((q, index) => {
+            // ... 同上生成 HTML ...
+        });
+        container.innerHTML = html;
+        console.log('【DEBUG】列表容器已更新');
+    }
+}
+
+// 辅助函数：获取问题类型显示名称
+function getQuestionTypeDisplay(type) {
+    const map = {'radio': '单选题', 'checkbox': '多选题', 'text': '简答题'};
+    return map[type] || type;
+}
+
+// 更新填写按钮状态
+function updateButtonUI(hasQrcode, userSubmitted) {
+    const fillBtn = document.getElementById('fill-questionnaire-btn');
+    if (!fillBtn) {
+        console.log('updateButtonUI: 按钮元素不存在');
+        return;
+    }
+
+    console.log('updateButtonUI: hasQrcode=', hasQrcode, 'userSubmitted=', userSubmitted);
+
+    fillBtn.classList.remove('btn-success', 'btn-secondary', 'disabled');
+
+    if (userSubmitted) {
+        fillBtn.classList.add('btn-secondary');
+        fillBtn.setAttribute('disabled', 'disabled');
+        fillBtn.setAttribute('title', '您已填写过此问卷');
+        fillBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i>填写问卷';
+        // 如果是 <a> 标签，移除 href 并改为按钮
+        if (fillBtn.tagName === 'A') {
+            fillBtn.removeAttribute('href');
+            // 替换为 <button> 保持一致性
+            const newBtn = document.createElement('button');
+            newBtn.id = 'fill-questionnaire-btn';
+            newBtn.className = fillBtn.className;
+            newBtn.setAttribute('disabled', 'disabled');
+            newBtn.setAttribute('title', '您已填写过此问卷');
+            newBtn.innerHTML = fillBtn.innerHTML;
+            fillBtn.parentNode.replaceChild(newBtn, fillBtn);
+        }
+    } else if (!hasQrcode && {{ questionnaire.enable_multi_qrcodes|yesno:"true,false" }}) {
+        fillBtn.classList.add('btn-secondary');
+        fillBtn.setAttribute('disabled', 'disabled');
+        fillBtn.setAttribute('title', '当前无可用的二维码，无法填写');
+        fillBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i>填写问卷';
+        if (fillBtn.tagName === 'A') {
+            fillBtn.removeAttribute('href');
+            const newBtn = document.createElement('button');
+            newBtn.id = 'fill-questionnaire-btn';
+            newBtn.className = fillBtn.className;
+            newBtn.setAttribute('disabled', 'disabled');
+            newBtn.setAttribute('title', '当前无可用的二维码，无法填写');
+            newBtn.innerHTML = fillBtn.innerHTML;
+            fillBtn.parentNode.replaceChild(newBtn, fillBtn);
+        }
+    } else {
+        fillBtn.classList.add('btn-success');
+        fillBtn.removeAttribute('disabled');
+        fillBtn.setAttribute('title', '');
+        fillBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i>填写问卷';
+        // 确保是 <a> 标签，并且 href 正确
+        if (fillBtn.tagName !== 'A') {
+            const newLink = document.createElement('a');
+            newLink.id = 'fill-questionnaire-btn';
+            newLink.className = fillBtn.className + ' btn-success';
+            newLink.href = "{% url 'survey_form' questionnaire.id %}";
+            newLink.innerHTML = fillBtn.innerHTML;
+            fillBtn.parentNode.replaceChild(newLink, fillBtn);
+        } else {
+            fillBtn.href = "{% url 'survey_form' questionnaire.id %}";
+        }
+    }
+}
+
+// 更新统计信息（提交次数等）
+function updateStatsUI(submitCount) {
+    const submitCountSpan = document.getElementById('submit-count');
+    if (submitCountSpan) {
+        submitCountSpan.textContent = submitCount;
+    }
+}
+// 在页面加载后调用
+document.addEventListener('DOMContentLoaded', function() {
+    if (!window.__data_loaded_from_storage) {
+        //fetchLatestData(); // 只有未从存储加载时才执行
+    }
+});
+</script>
+</body>
+</html>

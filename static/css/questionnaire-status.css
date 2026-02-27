@@ -1,0 +1,89 @@
+/* 状态页面专用样式 */
+
+/* 状态卡片动画 */
+.unpublished-card {
+    animation: fadeInUp 0.6s ease-out;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 状态徽章动画 */
+.status-badge {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(255, 153, 102, 0.4);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(255, 153, 102, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(255, 153, 102, 0);
+    }
+}
+
+/* 时间线连接线动画 */
+.status-timeline::before {
+    animation: drawLine 1s ease-out forwards;
+}
+
+@keyframes drawLine {
+    from {
+        width: 0;
+    }
+    to {
+        width: 80%;
+    }
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .unpublished-header {
+        padding: 30px 20px;
+    }
+
+    .unpublished-body {
+        padding: 25px;
+    }
+
+    .action-buttons {
+        flex-direction: column;
+    }
+
+    .action-buttons .btn {
+        width: 100%;
+        margin-bottom: 10px;
+    }
+}
+
+/* 暗色模式支持 */
+@media (prefers-color-scheme: dark) {
+    body {
+        background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+    }
+
+    .unpublished-card {
+        background: #2d2d2d;
+        color: #f8f9fa;
+    }
+
+    .questionnaire-info {
+        background: #3d3d3d;
+        border-left-color: #ff9966;
+    }
+
+    .tips-box {
+        background: #1e3a5f;
+    }
+}

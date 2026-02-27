@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>问卷未发布 - {{ questionnaire.title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding: 20px;
+        }
+        .unpublished-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            max-width: 600px;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        .unpublished-header {
+            background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+        .unpublished-body {
+            padding: 40px;
+        }
+        .questionnaire-info {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #ff9966;
+        }
+        .status-badge {
+            font-size: 0.9rem;
+            padding: 5px 12px;
+            border-radius: 20px;
+        }
+        .status-draft {
+            background-color: #ffc107;
+            color: #000;
+        }
+        .status-closed {
+            background-color: #6c757d;
+            color: #fff;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+        .status-timeline {
+            display: flex;
+            justify-content: space-between;
+            margin: 30px 0;
+            position: relative;
+        }
+        .status-timeline::before {
+            content: '';
+            position: absolute;
+            top: 15px;
+            left: 10%;
+            right: 10%;
+            height: 2px;
+            background: #dee2e6;
+            z-index: 1;
+        }
+        .timeline-step {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            flex: 1;
+        }
+        .timeline-icon {
+            width: 30px;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        .timeline-step.active .timeline-icon {
+            background: #ff9966;
+            color: white;
+        }
+        .timeline-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        .tips-box {
+            background: #e7f3ff;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="unpublished-card">
+                    <!-- 头部 -->
+                    <div class="unpublished-header">
+                        <h1><i class="fas fa-clock me-3"></i>问卷未发布</h1>
+                        <p class="lead mb-0">该问卷暂时无法访问</p>
+                    </div>
+
+                    <!-- 内容区 -->
+                    <div class="unpublished-body">
+                        <!-- 问卷信息 -->
+                        <div class="questionnaire-info">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h4>{{ questionnaire.title }}</h4>
+                                <span class="status-badge
+                                    {% if questionnaire.status == 'draft' %}status-draft
+                                    {% elif questionnaire.status == 'closed' %}status-closed{% endif %}">
+                                    {{ questionnaire.get_status_display }}
+                                </span>
+                            </div>
+
+                            {% if questionnaire.description %}
+                            <p class="mb-3">{{ questionnaire.description|truncatechars:150 }}</p>
+                            {% endif %}
+
+                            <div class="row text-muted small">
+                                <div class="col-md-6">
+                                    <i class="fas fa-user me-1"></i>创建者: {{ questionnaire.creator.username }}
+                                </div>
+                                <div class="col-md-6">
+                                    <i class="fas fa-calendar me-1"></i>创建时间: {{ questionnaire.created_at|date:"Y-m-d H:i" }}
+                                </div>
+                            </div>
+
+                            {% if questionnaire.published_at %}
+                            <div class="row text-muted small mt-2">
+                                <div class="col-md-6">
+                                    <i class="fas fa-paper-plane me-1"></i>发布时间: {{ questionnaire.published_at|date:"Y-m-d H:i" }}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+
+                        <!-- 状态时间线 -->
+                        <div class="status-timeline">
+                            <div class="timeline-step {% if questionnaire.status == 'draft' %}active{% endif %}">
+                                <div class="timeline-icon">
+                                    <i class="fas fa-edit"></i>
+                                </div>
+                                <div class="timeline-label">草稿</div>
+                            </div>
+                            <div class="timeline-step {% if questionnaire.status == 'published' %}active{% endif %}">
+                                <div class="timeline-icon">
+                                    <i class="fas fa-paper-plane"></i>
+                                </div>
+                                <div class="timeline-label">已发布</div>
+                            </div>
+                            <div class="timeline-step {% if questionnaire.status == 'closed' %}active{% endif %}">
+                                <div class="timeline-icon">
+                                    <i class="fas fa-lock"></i>
+                                </div>
+                                <div class="timeline-label">已关闭</div>
+                            </div>
+                        </div>
+
+                        <!-- 状态说明 -->
+                        <div class="alert
+                            {% if questionnaire.status == 'draft' %}alert-warning
+                            {% elif questionnaire.status == 'closed' %}alert-secondary{% endif %}">
+                            <h5>
+                                <i class="fas fa-info-circle me-2"></i>
+                                {% if questionnaire.status == 'draft' %}
+                                问卷目前处于草稿状态
+                                {% elif questionnaire.status == 'closed' %}
+                                问卷已关闭
+                                {% else %}
+                                问卷状态异常
+                                {% endif %}
+                            </h5>
+                            <p class="mb-0">
+                                {% if questionnaire.status == 'draft' %}
+                                创建者正在编辑此问卷，尚未发布。请稍后再试，或联系创建者了解发布时间。
+                                {% elif questionnaire.status == 'closed' %}
+                                此问卷已结束收集，不再接受新的提交。感谢您的关注。
+                                {% endif %}
+                            </p>
+                        </div>
+
+                        <!-- 操作按钮 -->
+                        <div class="action-buttons">
+                            {% if request.user == questionnaire.creator or request.user.is_admin %}
+                                {% if questionnaire.status == 'draft' %}
+                                <a href="{% url 'edit_questionnaire' questionnaire.id %}" class="btn btn-warning">
+                                    <i class="fas fa-edit me-2"></i>继续编辑
+                                </a>
+                                <a href="{% url 'publish_questionnaire' questionnaire.id %}" class="btn btn-primary">
+                                    <i class="fas fa-paper-plane me-2"></i>发布问卷
+                                </a>
+                                {% endif %}
+                            {% endif %}
+
+                            <a href="{% url 'questionnaire_list' %}" class="btn btn-outline-primary">
+                                <i class="fas fa-list me-2"></i>浏览其他问卷
+                            </a>
+
+                            <a href="{% url 'home' %}" class="btn btn-outline-secondary">
+                                <i class="fas fa-home me-2"></i>返回首页
+                            </a>
+                        </div>
+
+                        <!-- 提示信息 -->
+                        <div class="tips-box">
+                            <h6><i class="fas fa-lightbulb me-2"></i>温馨提示</h6>
+                            <ul class="mb-0">
+                                <li><small>如果您是问卷创建者，请登录后编辑和发布问卷</small></li>
+                                <li><small>公开问卷发布后，用户可以通过链接或二维码访问</small></li>
+                                <li><small>邀请码问卷发布后，需要输入正确的邀请码才能访问</small></li>
+                                <li><small>问卷发布后可以随时关闭，关闭后将不再接受新的提交</small></li>
+                            </ul>
+                        </div>
+
+                        <!-- 用户信息 -->
+                        <div class="text-center mt-4 pt-3 border-top">
+                            <small class="text-muted">
+                                {% if request.user.is_authenticated %}
+                                当前用户: {{ request.user.username }} |
+                                <a href="{% url 'logout' %}" class="text-decoration-none">退出登录</a>
+                                {% else %}
+                                <a href="{% url 'login' %}" class="text-decoration-none">登录系统</a> |
+                                <a href="{% url 'register' %}" class="text-decoration-none">注册账户</a>
+                                {% endif %}
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 页面加载完成后，如果问卷是草稿状态，可以显示预计发布时间（如果有）
+        document.addEventListener('DOMContentLoaded', function() {
+            // 可以在这里添加动态效果，比如显示倒计时
+            const status = "{{ questionnaire.status }}";
+            if (status === 'draft') {
+                // 可以显示提示信息
+                console.log('问卷处于草稿状态，等待发布');
+            }
+        });
+    </script>
+</body>
+</html>

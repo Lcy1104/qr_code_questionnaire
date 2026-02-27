@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仪表盘 - 问卷调查系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4e73df;
+            --secondary-color: #858796;
+            --success-color: #1cc88a;
+            --info-color: #36b9cc;
+            --warning-color: #f6c23e;
+            --danger-color: #e74a3b;
+            --light-color: #f8f9fc;
+            --dark-color: #5a5c69;
+        }
+
+        body {
+            background-color: #f8f9fc;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .sidebar {
+            background: linear-gradient(180deg, var(--primary-color) 0%, #224abe 100%);
+            min-height: 100vh;
+            box-shadow: 0 0 15px rgba(0,0,0,0.1);
+            position: fixed;
+            width: 250px;
+            z-index: 1000;
+        }
+
+        .sidebar-brand {
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .sidebar-brand i {
+            margin-right: 10px;
+        }
+
+        .sidebar-divider {
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin: 1rem 0;
+        }
+
+        .nav-item .nav-link {
+            color: rgba(255,255,255,0.8);
+            padding: 0.75rem 1rem;
+            transition: all 0.3s;
+        }
+
+        .nav-item .nav-link:hover {
+            color: white;
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        .nav-item .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.2);
+            border-left: 4px solid white;
+        }
+
+        .nav-item .nav-link i {
+            width: 20px;
+            text-align: center;
+            margin-right: 10px;
+        }
+
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+
+        .topbar {
+            background-color: white;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        .stat-card {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+            transition: transform 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .stat-icon {
+            font-size: 2rem;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--dark-color);
+        }
+
+        .stat-label {
+            color: var(--secondary-color);
+            font-size: 0.9rem;
+        }
+
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            background-color: white;
+            border-bottom: 1px solid #e3e6f0;
+            padding: 15px 20px;
+            border-radius: 10px 10px 0 0 !important;
+            font-weight: bold;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+
+        .btn-primary:hover {
+            background-color: #3a5ccc;
+            border-color: #3a5ccc;
+        }
+
+        .quick-action {
+            text-align: center;
+            padding: 20px;
+            border-radius: 10px;
+            background-color: white;
+            box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1);
+            transition: all 0.3s;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .quick-action:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 0.5rem 2rem 0 rgba(58, 59, 69, 0.2);
+            text-decoration: none;
+            color: var(--primary-color);
+        }
+
+        .quick-action-icon {
+            font-size: 2.5rem;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                position: relative;
+                min-height: auto;
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+        <a href="{% url 'dashboard' %}" class="sidebar-brand">
+            <i class="fas fa-poll"></i> 问卷系统
+        </a>
+
+        <div class="sidebar-divider"></div>
+
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link active" href="{% url 'dashboard' %}">
+                    <i class="fas fa-tachometer-alt"></i> 仪表盘
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'my_questionnaires' %}">
+                    <i class="fas fa-file-alt"></i> 我的问卷
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'create_questionnaire' %}">
+                    <i class="fas fa-plus-circle"></i> 创建问卷
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'my_responses' %}">
+                    <i class="fas fa-check-circle"></i> 我的回答
+                </a>
+            </li>
+
+            {% if is_admin %}
+            <div class="sidebar-divider"></div>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'admin_dashboard' %}">
+                    <i class="fas fa-cog"></i> 系统管理
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'manage_users' %}">
+                    <i class="fas fa-users"></i> 用户管理
+                </a>
+            </li>
+            {% endif %}
+
+            <div class="sidebar-divider"></div>
+        
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'notification_list' %}">
+                    <i class="fas fa-bell"></i> 消息通知
+                    {% if unread_count > 0 %}
+                        <span class="badge bg-danger float-end">{{ unread_count }}</span>
+                    {% endif %}
+                </a>
+            </li>
+        
+            <li class="nav-item">
+                <a class="nav-link" href="{% url 'logout' %}">
+                    <i class="fas fa-sign-out-alt"></i> 退出登录
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <!-- 主要内容区 -->
+    <div class="main-content">
+        <!-- 顶部导航栏 - 修改点：将 user-info 包裹在链接中 -->
+        <div class="topbar">
+            <h3 class="mb-0">欢迎回来，{{ user.username }}！</h3>
+            <a href="{% url 'user_profile' %}" style="text-decoration: none; color: inherit;">
+                <div class="user-info">
+                    <div class="user-avatar">
+                        {{ user.username|slice:":1"|upper }}
+                    </div>
+                    <div>
+                        <div class="fw-bold">{{ user.username }}</div>
+                        <small class="text-muted">{{ user.email }}</small>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <!-- 统计卡片 -->
+        <div class="row">
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-file-alt"></i>
+                    </div>
+                    <div class="stat-number">{{ total_questionnaires }}</div>
+                    <div class="stat-label">问卷总数</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="stat-number">{{ published_questionnaires }}</div>
+                    <div class="stat-label">已发布问卷</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <div class="stat-number">{{ total_responses }}</div>
+                    <div class="stat-label">收到的回答</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-calendar-day"></i>
+                    </div>
+                    <div class="stat-number">{{ today|date:"m/d" }}</div>
+                    <div class="stat-label">今日日期</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 快速操作 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-bolt me-2"></i> 快速操作
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3 mb-3">
+                                <a href="{% url 'create_questionnaire' %}" class="quick-action">
+                                    <div class="quick-action-icon">
+                                        <i class="fas fa-plus-circle"></i>
+                                    </div>
+                                    <h6>创建问卷</h6>
+                                    <p class="small text-muted">开始新的问卷调查</p>
+                                </a>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <a href="{% url 'my_questionnaires' %}" class="quick-action">
+                                    <div class="quick-action-icon">
+                                        <i class="fas fa-list"></i>
+                                    </div>
+                                    <h6>管理问卷</h6>
+                                    <p class="small text-muted">查看和编辑所有问卷</p>
+                                </a>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <a href="{% url 'questionnaire_list' %}?status=draft" class="quick-action">
+                                    <div class="quick-action-icon">
+                                        <i class="fas fa-file-alt"></i>
+                                    </div>
+                                    <h6>草稿区</h6>
+                                    <p class="small text-muted">查看所有草稿问卷</p>
+                                </a>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <a href="{% url 'my_responses' %}" class="quick-action">
+                                    <div class="quick-action-icon">
+                                        <i class="fas fa-chart-bar"></i>
+                                    </div>
+                                    <h6>查看统计</h6>
+                                    <p class="small text-muted">分析问卷结果</p>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- 最近问卷 -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-clock me-2"></i> 最近问卷
+                    </div>
+                    <div class="card-body">
+                        {% if recent_questionnaires %}
+                        <div class="list-group list-group-flush">
+                            {% for questionnaire in recent_questionnaires %}
+                            <a href="{% url 'questionnaire_detail' questionnaire.id %}" class="list-group-item list-group-item-action">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">{{ questionnaire.title|truncatechars:40 }}</h6>
+                                    <small>{{ questionnaire.created_at|date:"m/d" }}</small>
+                                </div>
+                                <p class="mb-1 text-muted small">{{ questionnaire.description|truncatechars:60 }}</p>
+                                <small>
+                                    {% if questionnaire.published_at %}
+                                    <span class="badge bg-success">已发布</span>
+                                    {% else %}
+                                    <span class="badge bg-warning">草稿</span>
+                                    {% endif %}
+                                </small>
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">暂无问卷</p>
+                            <a href="{% url 'create_questionnaire' %}" class="btn btn-primary btn-sm">创建第一个问卷</a>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- 最近回答 -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-check-circle me-2"></i> 最近回答
+                    </div>
+                    <div class="card-body">
+                        {% if recent_responses %}
+                        <div class="list-group list-group-flush">
+                            {% for response in recent_responses %}
+                            <div class="list-group-item">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">{{ response.questionnaire.title|truncatechars:30 }}</h6>
+                                    <small>{{ response.submitted_at|date:"m/d H:i" }}</small>
+                                </div>
+                                <p class="mb-1 small">
+                                    <span class="text-muted">回答者：</span>
+                                    {% if response.user %}
+                                    {{ response.user.username }}
+                                    {% else %}
+                                    匿名用户
+                                    {% endif %}
+                                </p>
+                                <small class="text-muted">{{ response.submitted_at|timesince }}前</small>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4">
+                            <i class="fas fa-comments fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">暂无回答记录</p>
+                            <p class="small text-muted">分享您的问卷以收集回答</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 系统信息 -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-info-circle me-2"></i> 系统信息
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><i class="fas fa-user me-2"></i> 用户名：{{ user.username }}</p>
+                                <p><i class="fas fa-envelope me-2"></i> 邮箱：{{ user.email }}</p>
+                                <p><i class="fas fa-calendar me-2"></i> 注册时间：{{ user.date_joined|date:"Y年m月d日" }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><i class="fas fa-shield-alt me-2"></i> 安全状态：正常</p>
+                                <p><i class="fas fa-clock me-2"></i> 当前时间：<span id="current-time"></span></p>
+                                <p><i class="fas fa-question-circle me-2"></i> 今日提示：分享问卷时可以使用二维码</p>
+                            </div>
+                        </div>
+                        <div class="alert alert-info mt-3">
+                            <small><i class="fas fa-lightbulb me-1"></i> 提示：创建问卷后，记得发布并生成二维码，方便他人访问！</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+        // 1. 覆盖全局的未读计数更新函数，重点更新侧边栏
+function updateUnreadCountForDashboard(count) {
+    // 核心：更新侧边栏链接上的徽章
+    const sidebarLink = document.querySelector('.sidebar .nav-link[href*="notification"]');
+    if (sidebarLink) {
+        let badge = sidebarLink.querySelector('.badge.bg-danger');
+        if (count > 0) {
+            if (!badge) {
+                // 如果徽章不存在，则创建它
+                badge = document.createElement('span');
+                badge.className = 'badge bg-danger float-end';
+                sidebarLink.appendChild(badge);
+            }
+            badge.textContent = count;
+            badge.style.display = 'inline';
+        } else if (badge) {
+            // 如果数量为0，隐藏徽章但不移除，保持DOM结构稳定
+            badge.style.display = 'none';
+        }
+    }
+    // (可选) 如果未来仪表盘加了顶部导航栏，这里也可以更新它
+    console.log(`仪表盘侧边栏未读计数更新为：${count}`);
+}
+// 2. 新通知到达时的处理（针对仪表盘页优化）
+function handleNewNotificationOnDashboard(notification) {
+    console.log('仪表盘页收到新通知:', notification);
+    
+    // 更新未读计数（假设在原有基础上+1）
+    const sidebarBadge = document.querySelector('.sidebar .nav-link[href*="notification"] .badge.bg-danger');
+    const currentCount = sidebarBadge ? parseInt(sidebarBadge.textContent) || 0 : 0;
+    updateUnreadCountForDashboard(currentCount + 1);
+    
+    // 在仪表盘页显示一个温和的提示（使用Bootstrap Toast）
+    showDashboardNotificationToast(notification);
+}
+
+// 3. 显示Toast提示（比alert优雅，比下拉菜单更适合仪表盘）
+function showDashboardNotificationToast(notification) {
+    // 动态创建或获取Toast容器
+    let toastContainer = document.getElementById('dashboardToastContainer');
+    if (!toastContainer) {
+        toastContainer = document.createElement('div');
+        toastContainer.id = 'dashboardToastContainer';
+        toastContainer.className = 'toast-container position-fixed top-0 end-0 p-3';
+        toastContainer.style.zIndex = '1100';
+        document.body.appendChild(toastContainer);
+    }
+    
+    // 创建唯一的Toast ID
+    const toastId = 'toast-' + Date.now();
+    const toastHtml = `
+        <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="5000">
+            <div class="toast-header">
+                <i class="fas fa-bell text-primary me-2"></i>
+                <strong class="me-auto">新通知</strong>
+                <small class="text-muted">刚刚</small>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="关闭"></button>
+            </div>
+            <div class="toast-body">
+                <strong>${notification.title || '新消息'}</strong><br>
+                <small class="text-muted">${notification.message || '请点击查看详情'}</small>
+            </div>
+        </div>
+    `;
+    
+    toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+    const toastEl = document.getElementById(toastId);
+    const toast = new bootstrap.Toast(toastEl);
+    toast.show();
+    
+    // Toast隐藏后移除元素
+    toastEl.addEventListener('hidden.bs.toast', function () {
+        toastEl.remove();
+    });
+}
+
+// 4. 建立WebSocket连接（复用原有逻辑，但使用仪表盘专属处理器）
+function setupDashboardWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/notifications/`;
+    
+    let websocket = null;
+    
+    function connect() {
+        if (websocket && websocket.readyState === WebSocket.OPEN) return;
+        
+        try {
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function() {
+                console.log('仪表盘页WebSocket连接已建立');
+                // 可以在这里请求一次未读数量进行初始化
+            };
+            
+            websocket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    // 根据消息类型分发处理
+                    if (data.type === 'new_notification') {
+                        handleNewNotificationOnDashboard(data.notification);
+                    } else if (data.type === 'unread_count') {
+                        updateUnreadCountForDashboard(data.unread_count);
+                    }
+                    // 其他类型消息可在此扩展
+                } catch (error) {
+                    console.error('解析消息失败:', error);
+                }
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('仪表盘页WebSocket错误:', error);
+            };
+            
+            websocket.onclose = function(event) {
+                console.log('仪表盘页WebSocket连接关闭，尝试重连...', event.code, event.reason);
+                // 简单重连机制
+                setTimeout(connect, 3000);
+            };
+        } catch (error) {
+            console.error('建立连接失败:', error);
+        }
+    }
+    
+    // 初始化连接
+    connect();
+    
+    // 页面可见性变化时重连
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && (!websocket || websocket.readyState !== WebSocket.OPEN)) {
+            connect();
+        }
+    });
+}
+
+// 5. 页面加载完成后，初始化仪表盘的通知功能
+document.addEventListener('DOMContentLoaded', function() {
+    // 确保Bootstrap已加载（Toast组件依赖）
+    if (typeof bootstrap === 'undefined') {
+        console.warn('Bootstrap未加载，Toast提示将不可用');
+    }
+    
+    // 初始化WebSocket连接
+    if (typeof WebSocket !== 'undefined') {
+        setupDashboardWebSocket();
+    } else {
+        console.warn('浏览器不支持WebSocket，仪表盘通知将无法实时更新');
+    }
+    
+    // 页面加载时，可以立即从服务器获取一次未读数量来初始化侧边栏徽章
+    fetch('/notifications/unread-count/')
+         .then(r => r.json())
+         .then(data => updateUnreadCountForDashboard(data.unread_count));
+});
+        // 显示当前时间
+        function updateTime() {
+            const now = new Date();
+            const timeString = now.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+            document.getElementById('current-time').textContent = timeString;
+        }
+
+        updateTime();
+        setInterval(updateTime, 1000);
+
+        // 激活当前页面的菜单项
+        document.addEventListener('DOMContentLoaded', function() {
+            const currentPath = window.location.pathname;
+            const navLinks = document.querySelectorAll('.nav-link');
+
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === currentPath) {
+                    link.classList.add('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

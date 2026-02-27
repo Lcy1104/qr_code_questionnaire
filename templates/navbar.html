@@ -1,0 +1,684 @@
+<nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+    <div class="container">
+        <a class="navbar-brand" href="{% url 'dashboard' %}">
+            <i class="fas fa-poll me-2"></i>
+            <strong>问卷系统</strong>
+        </a>
+
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
+                       href="{% url 'dashboard' %}">
+                        <i class="fas fa-tachometer-alt me-1"></i>仪表盘
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if 'questionnaire' in request.resolver_match.url_name %}active{% endif %}"
+                       href="{% url 'questionnaire_list' %}">
+                        <i class="fas fa-list me-1"></i>我的问卷
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'my_responses' %}active{% endif %}"
+                       href="{% url 'my_responses' %}">
+                        <i class="fas fa-history me-1"></i>我的回答
+                    </a>
+                </li>
+                {% if is_admin %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'manage_users' %}active{% endif %}"
+                       href="{% url 'manage_users' %}">
+                        <i class="fas fa-users me-1"></i>用户管理
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.resolver_match.url_name == 'admin_statistics' %}active{% endif %}"
+                       href="{% url 'admin_statistics' %}">
+                        <i class="fas fa-chart-bar me-1"></i>系统统计
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+
+            <ul class="navbar-nav">
+                <!-- 通知下拉菜单 -->
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle position-relative" href="#" id="notificationDropdown"
+                       role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-bell"></i>
+                        {% if notification_unread_count > 0 %}
+                            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                                {{ notification_unread_count }}
+                                <span class="visually-hidden">未读消息</span>
+                            </span>
+                        {% endif %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="notificationDropdown" style="min-width: 300px;">
+                        <li>
+                            <h6 class="dropdown-header">最近通知</h6>
+                        </li>
+                        {% if recent_notifications %}
+                            {% for notification in recent_notifications %}
+                            <li>
+                                <a class="dropdown-item {% if not notification.is_read %}fw-bold{% endif %}"
+                                   href="{% url 'notification_detail' notification.id %}">
+                                    <div class="d-flex w-100 justify-content-between">
+                                        <small>{{ notification.title|truncatechars:25 }}</small>
+                                        <small class="text-muted">{{ notification.time_since }}</small>
+                                    </div>
+                                    <small class="text-muted">{{ notification.message|truncatechars:35 }}</small>
+                                </a>
+                            </li>
+                            {% endfor %}
+                        {% else %}
+                        <li>
+                            <a class="dropdown-item text-muted text-center" href="#">
+                                <i class="fas fa-bell-slash me-1"></i>暂无通知
+                            </a>
+                        </li>
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item" href="{% url 'notification_list' %}">
+                                <i class="fas fa-list me-1"></i>查看所有通知
+                            </a>
+                        </li>
+                        {% if notification_unread_count > 0 %}
+                        <li>
+                            <a class="dropdown-item" href="#" onclick="markAllNotificationsAsRead(event)">
+                                <i class="fas fa-check-double me-1"></i>标记所有为已读
+                            </a>
+                        </li>
+                        {% endif %}
+                        <li>
+                            <a class="dropdown-item" href="{% url 'notification_settings' %}">
+                                <i class="fas fa-cog me-1"></i>通知设置
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+
+                <!-- 用户下拉菜单 -->
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button"
+                       data-bs-toggle="dropdown">
+                        <i class="fas fa-user-circle me-1"></i>{{ request.user.username }}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                            <a class="dropdown-item" href="{% url 'user_profile' %}">
+                                <i class="fas fa-user me-2"></i>个人资料
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{% url 'my_responses' %}">
+                                <i class="fas fa-history me-2"></i>我的回答
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="{% url 'notification_list' %}">
+                                <i class="fas fa-bell me-2"></i>消息通知
+                                {% if notification_unread_count > 0 %}
+                                    <span class="badge bg-danger float-end">{{ notification_unread_count }}</span>
+                                {% endif %}
+                            </a>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item text-danger" href="{% url 'logout' %}">
+                                <i class="fas fa-sign-out-alt me-2"></i>退出登录
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- 导航栏的CSS样式 -->
+<style>
+    .navbar {
+        padding: 0.5rem 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .navbar-brand {
+        font-size: 1.25rem;
+        font-weight: 600;
+    }
+
+    .nav-link {
+        font-weight: 500;
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        transition: all 0.3s ease;
+    }
+
+    .nav-link:hover, .nav-link.active {
+        background-color: rgba(78, 115, 223, 0.1);
+        color: #4e73df;
+    }
+
+    .dropdown-menu {
+        border: none;
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+        border-radius: 0.375rem;
+    }
+
+    .dropdown-item {
+        padding: 0.5rem 1rem;
+        transition: all 0.2s ease;
+    }
+
+    .dropdown-item:hover {
+        background-color: #f8f9fa;
+        color: #4e73df;
+    }
+
+    .dropdown-item.text-danger:hover {
+        background-color: #f8d7da;
+        color: #dc3545;
+    }
+
+    .notification-badge-container {
+        position: relative;
+    }
+
+    .notification-dropdown-header {
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    @media (max-width: 991.98px) {
+        .navbar-nav .dropdown-menu {
+            position: static;
+            float: none;
+            width: auto;
+            margin-top: 0;
+            background-color: transparent;
+            border: 0;
+            box-shadow: none;
+        }
+
+        .nav-link {
+            padding: 0.5rem 0;
+        }
+    }
+</style>
+
+<!-- 导航栏的JavaScript -->
+<script>
+// 1. 获取CSRF token的辅助函数
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+// 2. 标记所有通知为已读的函数
+function markAllNotificationsAsRead(event) {
+    event.preventDefault(); // 阻止默认链接行为
+    
+    // 显示加载状态
+    const link = event.target.closest('a');
+    const originalText = link.innerHTML;
+    link.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>处理中...';
+    
+    // 发送AJAX请求
+    fetch('{% url "mark_all_read" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': getCookie('csrftoken'),
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // 1. 隐藏所有未读徽章
+            document.querySelectorAll('.badge.bg-danger').forEach(badge => {
+                badge.style.display = 'none';
+            });
+            
+            // 2. 移除所有通知项的加粗样式
+            document.querySelectorAll('.dropdown-item.fw-bold').forEach(item => {
+                item.classList.remove('fw-bold');
+            });
+            
+            alert(data.message || '已标记所有通知为已读');
+        } else {
+            alert(data.message || '标记失败');
+        }
+    })
+    .catch(error => {
+        alert('网络错误，请重试');
+        console.error('标记所有为已读失败:', error);
+    })
+    .finally(() => {
+        // 恢复按钮文本
+        link.innerHTML = originalText;
+        
+        // 关闭下拉菜单
+        const dropdown = document.getElementById('notificationDropdown');
+        if (dropdown) {
+            const menu = dropdown.nextElementSibling;
+            if (menu) {
+                menu.classList.remove('show');
+                dropdown.setAttribute('aria-expanded', 'false');
+            }
+        }
+    });
+}
+
+// 3. WebSocket实时通知
+function setupWebSocketNotifications() {
+    // 获取WebSocket URL
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/notifications/`;
+    
+    let websocket = null;
+    let reconnectAttempts = 0;
+    const maxReconnectAttempts = 5;
+    const reconnectDelay = 3000; // 3秒
+    
+    function connectWebSocket() {
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+            return;
+        }
+        
+        try {
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function(event) {
+                console.log('WebSocket连接已建立');
+                reconnectAttempts = 0;
+                
+                // 连接成功后立即获取未读通知数量
+                fetchUnreadCount();
+            };
+            
+            websocket.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('解析WebSocket消息失败:', error);
+                }
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('WebSocket错误:', error);
+            };
+            
+            websocket.onclose = function(event) {
+                console.log('WebSocket连接已关闭，代码:', event.code, '原因:', event.reason);
+                
+                // 如果不是正常关闭，尝试重连
+                if (event.code !== 1000 && reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    console.log(`尝试重新连接 (${reconnectAttempts}/${maxReconnectAttempts})...`);
+                    
+                    setTimeout(() => {
+                        connectWebSocket();
+                    }, reconnectDelay * reconnectAttempts);
+                }
+            };
+            
+        } catch (error) {
+            console.error('建立WebSocket连接失败:', error);
+        }
+    }
+    
+    function handleWebSocketMessage(data) {
+        console.log('【链路追踪】WebSocket收到原始数据:', data); 
+        switch (data.type) {
+            case 'unread_count':
+                updateUnreadCount(data.unread_count);
+                break;
+                
+            case 'new_notification':
+                handleNewNotification(data.notification);
+                break;
+                
+            case 'marked_all_read':
+                console.log(`已标记 ${data.count} 条通知为已读`);
+                updateUnreadCount(0);
+                break;
+                
+            case 'error':
+                console.error('WebSocket错误:', data.message);
+                break;
+                
+            default:
+                console.log('收到未知消息类型:', data.type);
+        }
+    }
+    
+    function handleNewNotification(notification) {
+        console.log('收到新通知:', notification);
+        
+        // 更新未读数量
+        const currentCount = parseInt('{{ notification_unread_count|default:0 }}') || 0;
+        updateUnreadCount(currentCount + 1);
+        
+        // 显示桌面通知（如果浏览器支持且用户允许）
+        if ('Notification' in window && Notification.permission === 'granted') {
+            showDesktopNotification(notification);
+        }
+        
+        // 播放提示音
+        //playNotificationSound();
+        
+        // === 核心修复：将DOM更新和弹窗逻辑放入下一个事件循环，确保及时执行 ===
+    setTimeout(() => {
+        // 1. 更新下拉菜单中的通知列表
+        addNotificationToDropdown(notification);
+        
+        // 2. 自动弹出下拉菜单（增加重试机制）
+        tryAutoPopupNotification();
+    }, 0);
+    }
+    
+    // === 新增：独立的自动弹窗函数，包含重试机制 ===
+function tryAutoPopupNotification(retryCount = 0) {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 100; // 毫秒
+    
+    try {
+        const dropdownElement = document.getElementById('notificationDropdown');
+        
+        // 基础条件检查
+        if (!dropdownElement) {
+            console.warn('通知下拉菜单元素未找到');
+            return;
+        }
+        
+        // 检查Bootstrap是否完全加载
+        if (typeof bootstrap === 'undefined' || !bootstrap.Dropdown) {
+            console.warn('Bootstrap 未完全加载，延迟重试...');
+            if (retryCount < MAX_RETRIES) {
+                setTimeout(() => tryAutoPopupNotification(retryCount + 1), RETRY_DELAY);
+            }
+            return;
+        }
+        
+        // 创建Dropdown实例（如果不存在）
+        let dropdownInstance = bootstrap.Dropdown.getInstance(dropdownElement);
+        if (!dropdownInstance) {
+            dropdownInstance = new bootstrap.Dropdown(dropdownElement);
+        }
+        
+        // 显示下拉菜单
+        dropdownInstance.show();
+        console.log('✅ 新通知：已自动弹出提醒。');
+        
+        // 5秒后自动收回
+        setTimeout(() => {
+            if (dropdownElement.classList.contains('show')) {
+                dropdownInstance.hide();
+                console.log('✅ 提醒已自动收回。');
+            }
+        }, 5000);
+        
+    } catch (error) {
+        console.error('自动弹窗出错:', error);
+        // 可选：重试机制
+        if (retryCount < MAX_RETRIES) {
+            setTimeout(() => tryAutoPopupNotification(retryCount + 1), RETRY_DELAY);
+        }
+    }
+}
+    function updateUnreadCount(count) {
+        // 更新导航栏中的未读计数
+        const badge = document.querySelector('.navbar .badge.bg-danger');
+        if (badge) {
+            if (count > 0) {
+                badge.textContent = count;
+                badge.style.display = 'inline';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+        
+        // 更新下拉菜单中的计数
+        const menuBadge = document.querySelector('.dropdown-item .badge.bg-danger');
+        if (menuBadge) {
+            if (count > 0) {
+                menuBadge.textContent = count;
+                menuBadge.style.display = 'inline';
+            } else {
+                menuBadge.style.display = 'none';
+            }
+        }
+    }
+    
+    function showDesktopNotification(notification) {
+        const options = {
+            body: notification.message || '您有一条新通知',
+            icon: '/static/favicon.ico',
+            tag: notification.id,
+            requireInteraction: false,
+            silent: false
+        };
+        
+        const n = new Notification(notification.title || '新通知', options);
+        
+        n.onclick = function() {
+            window.focus();
+            window.location.href = `/notifications/${notification.id}/`;
+            n.close();
+        };
+        
+        setTimeout(n.close.bind(n), 5000);
+    }
+    
+    function playNotificationSound() {
+        try {
+            // 创建一个简单的通知音效
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = 800;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.5);
+        } catch (error) {
+            console.log('无法播放提示音:', error);
+        }
+    }
+    
+    function addNotificationToDropdown(notification) {
+    const dropdownList = document.querySelector('#notificationDropdown + .dropdown-menu');
+    if (!dropdownList) return;
+
+    // 1. 找到“最近通知”标题项
+    const headerItem = dropdownList.querySelector('.dropdown-header').closest('li');
+    if (!headerItem) return;
+
+    // 2. 创建新的通知项
+    const notificationItem = document.createElement('li');
+    notificationItem.innerHTML = `
+        <a class="dropdown-item fw-bold" href="/notifications/${notification.id}/">
+            <div class="d-flex w-100 justify-content-between">
+                <small>${notification.title || '新通知'}</small>
+                <small class="text-muted">刚刚</small>
+            </div>
+            <small class="text-muted">${(notification.message || '').substring(0, 35)}${(notification.message || '').length > 35 ? '...' : ''}</small>
+        </a>
+    `;
+
+    // *** 关键修复：将新通知插入到“标题项”之后 ***
+    // 这将严格保证新通知出现在“最近通知”标题下，其他所有固定项（分割线、按钮、设置）之前
+    if (headerItem.nextElementSibling) {
+        dropdownList.insertBefore(notificationItem, headerItem.nextElementSibling);
+    } else {
+        // 如果标题后无兄弟元素（异常情况），则直接追加到列表末尾
+        dropdownList.appendChild(notificationItem);
+    }
+
+    // 3. 移除“暂无通知”的提示项（如果存在）
+    const emptyItem = dropdownList.querySelector('.dropdown-item.text-muted.text-center');
+    if (emptyItem) {
+        emptyItem.remove();
+    }
+}
+    
+    function fetchUnreadCount() {
+        fetch('/notifications/unread-count/')
+            .then(response => response.json())
+            .then(data => {
+                updateUnreadCount(data.unread_count);
+            })
+            .catch(error => {
+                console.error('获取未读通知数量失败:', error);
+            });
+    }
+    
+    // 请求桌面通知权限
+    if ('Notification' in window) {
+        if (Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+    }
+    
+    // 初始化WebSocket连接
+    connectWebSocket();
+    
+    // 页面可见性变化时重连
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden && (!websocket || websocket.readyState !== WebSocket.OPEN)) {
+            connectWebSocket();
+        }
+    });
+    
+    // 每5分钟检查一次连接状态
+    setInterval(() => {
+        if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+            connectWebSocket();
+        }
+    }, 300000); // 5分钟
+}
+
+// DOM加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
+    // 高亮当前页面的菜单项
+    const currentPath = window.location.pathname;
+    const navLinks = document.querySelectorAll('.nav-link');
+    
+    navLinks.forEach(link => {
+        if (link.getAttribute('href') === currentPath) {
+            link.classList.add('active');
+        }
+    });
+    
+    // 设置WebSocket通知
+    if (typeof WebSocket !== 'undefined') {
+        setupWebSocketNotifications();
+    } else {
+        console.warn('浏览器不支持WebSocket，将使用轮询方式');
+        // 如果浏览器不支持WebSocket，使用轮询方式
+        setInterval(function() {
+            fetch('/notifications/unread-count/')
+                .then(response => response.json())
+                .then(data => {
+                    const badge = document.querySelector('.navbar .badge.bg-danger');
+                    if (badge) {
+                        if (data.unread_count > 0) {
+                            badge.textContent = data.unread_count;
+                            badge.style.display = 'inline';
+                        } else {
+                            badge.style.display = 'none';
+                        }
+                    }
+                    
+                    const menuBadge = document.querySelector('.dropdown-item .badge.bg-danger');
+                    if (menuBadge) {
+                        if (data.unread_count > 0) {
+                            menuBadge.textContent = data.unread_count;
+                            menuBadge.style.display = 'inline';
+                        } else {
+                            menuBadge.style.display = 'none';
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('检查通知失败:', error);
+                });
+        }, 30000); // 30秒轮询一次
+    }
+    
+    // 监听通知下拉菜单点击
+    const notificationDropdown = document.getElementById('notificationDropdown');
+    if (notificationDropdown) {
+        notificationDropdown.addEventListener('click', function(e) {
+            // 可以在这里添加点击下拉菜单时的逻辑
+            console.log('显示通知下拉菜单');
+        });
+    }
+});
+</script>
+<script>
+(function() {
+    // 检测 Bootstrap CSS
+    var bootstrapLink = document.querySelector('link[href*="bootstrap.min.css"]');
+    if (bootstrapLink) {
+        var cssLoaded = false;
+        for (var i = 0; i < document.styleSheets.length; i++) {
+            if (document.styleSheets[i].href && document.styleSheets[i].href.includes(bootstrapLink.href)) {
+                cssLoaded = true;
+                break;
+            }
+        }
+        if (!cssLoaded) {
+            bootstrapLink.href = 'https://cdn.bootcdn.net/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css';
+        }
+    }
+
+    // 检测 Bootstrap JS
+    var bootstrapScript = document.querySelector('script[src*="bootstrap.bundle.min.js"]');
+    if (bootstrapScript) {
+        bootstrapScript.onerror = function() {
+            this.src = 'https://cdn.bootcdn.net/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js';
+        };
+    }
+
+    // 检测 Font Awesome
+    var faLink = document.querySelector('link[href*="font-awesome"]');
+    if (faLink) {
+        var faLoaded = false;
+        for (var i = 0; i < document.styleSheets.length; i++) {
+            if (document.styleSheets[i].href && document.styleSheets[i].href.includes(faLink.href)) {
+                faLoaded = true;
+                break;
+            }
+        }
+        if (!faLoaded) {
+            faLink.href = 'https://cdn.bootcdn.net/ajax/libs/font-awesome/6.0.0/css/all.min.css';
+        }
+    }
+})();
+</script>

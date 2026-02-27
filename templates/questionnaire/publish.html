@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发布问卷 - {{ questionnaire.title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    {% include 'navbar.html' %}
+
+    <div class="container mt-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'questionnaire_list' %}">问卷列表</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'questionnaire_detail' questionnaire.id %}">{{ questionnaire.title|truncatechars:30 }}</a></li>
+                <li class="breadcrumb-item active">发布问卷</li>
+            </ol>
+        </nav>
+
+        <div class="row">
+            <div class="col-lg-8 mx-auto">
+                <div class="card">
+                    <div class="card-header bg-white">
+                        <h4 class="mb-0"><i class="fas fa-paper-plane me-2"></i>发布问卷</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <h5><i class="fas fa-info-circle me-2"></i>发布说明</h5>
+                            <ul class="mb-0">
+                                <li>发布后问卷将变为可访问状态</li>
+                                <li>将生成二维码，方便分享</li>
+                                <li>如果设置访问权限为"仅邀请"，将生成邀请码</li>
+                                <li>发布后问卷可以继续编辑，但建议在发布前完成所有修改</li>
+                            </ul>
+                        </div>
+
+                        <!-- 问卷预览 -->
+                        <div class="mb-4">
+                            <h5>问卷预览</h5>
+                            <div class="card">
+                                <div class="card-body">
+                                    <h6>{{ questionnaire.title }}</h6>
+                                    {% if questionnaire.description %}
+                                    <p class="text-muted">{{ questionnaire.description }}</p>
+                                    {% endif %}
+
+                                    <hr>
+
+                                    <h6>问题列表：</h6>
+                                    {% for question in questionnaire.questions.all %}
+                                    <div class="mb-3">
+                                        <p class="mb-1">
+                                            <strong>{{ forloop.counter }}. {{ question.text }}</strong>
+                                            <small class="text-muted ms-2">{{ question.get_question_type_display }}</small>
+                                            {% if question.required %}
+                                            <span class="badge bg-danger ms-2">必填</span>
+                                            {% endif %}
+                                        </p>
+
+                                        {% if question.question_type == 'radio' or question.question_type == 'checkbox' %}
+                                        <div class="ms-3">
+                                            {% for option in question.options %}
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="{% if question.question_type == 'radio' %}radio{% else %}checkbox{% endif %}" disabled>
+                                                <label class="form-check-label">{{ option }}</label>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                        {% elif question.question_type == 'text' %}
+                                        <div class="ms-3">
+                                            <textarea class="form-control" rows="2" placeholder="请输入回答..." disabled></textarea>
+                                            {% if question.max_length > 0 %}
+                                            <small class="text-muted">字数限制: {{ question.max_length }}字</small>
+                                            {% endif %}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 发布设置 -->
+                        <div class="mb-4">
+                            <h5>发布设置</h5>
+
+                            {% if questionnaire.access_type == 'invite' %}
+                            <div class="alert alert-warning">
+                                <h6><i class="fas fa-key me-2"></i>邀请码设置</h6>
+                                <p class="mb-2">您的问卷设置为"仅邀请"访问，发布后将生成一个8位邀请码。</p>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" value="等待生成..." id="inviteCode" readonly>
+                                    <button class="btn btn-outline-secondary" type="button" onclick="generateInviteCode()">
+                                        重新生成
+                                    </button>
+                                </div>
+                                <small class="text-muted">生成后请保存好邀请码，分享给填写者</small>
+                            </div>
+                            {% endif %}
+
+                            <div class="mb-3">
+                                <label class="form-label">问卷访问链接</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control"
+                                           value="{{ request.scheme }}://{{ request.get_host }}{% url 'survey_access' questionnaire.id %}"
+                                           id="surveyUrl" readonly>
+                                    <button class="btn btn-outline-secondary"
+                                            onclick="copySurveyUrl()" type="button">
+                                        <i class="fas fa-copy"></i> 复制
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 二维码预览 -->
+                        <div class="mb-4">
+                            <h5>二维码预览</h5>
+                            <div class="text-center border p-4 rounded bg-light">
+                                <div id="qrcodePreview" class="mb-3" style="min-height: 200px;">
+                                    <p class="text-muted">点击发布按钮后生成二维码</p>
+                                </div>
+                                <button type="button" class="btn btn-outline-primary" onclick="previewQRCode()">
+                                    <i class="fas fa-eye me-2"></i>预览二维码
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 发布确认 -->
+                        <div class="alert alert-warning">
+                            <h6><i class="fas fa-exclamation-triangle me-2"></i>确认发布</h6>
+                            <p class="mb-0">发布后问卷将对符合条件的用户开放填写，请确认所有设置正确。</p>
+                        </div>
+
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-success btn-lg">
+                                    <i class="fas fa-qrcode me-2"></i>发布并生成二维码
+                                </button>
+                                <a href="{% url 'questionnaire_detail' questionnaire.id %}"
+                                   class="btn btn-outline-secondary">
+                                    取消返回
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 生成邀请码
+        function generateInviteCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let code = '';
+            for (let i = 0; i < 8; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            document.getElementById('inviteCode').value = code;
+        }
+
+        // 复制问卷链接
+        function copySurveyUrl() {
+            const surveyUrl = document.getElementById('surveyUrl');
+            surveyUrl.select();
+            surveyUrl.setSelectionRange(0, 99999);
+            navigator.clipboard.writeText(surveyUrl.value)
+                .then(() => {
+                    showToast('链接已复制到剪贴板');
+                });
+        }
+
+        // 预览二维码
+        function previewQRCode() {
+            const url = document.getElementById('surveyUrl').value;
+            const qrcodeContainer = document.getElementById('qrcodePreview');
+
+            // 清空现有内容
+            qrcodeContainer.innerHTML = '';
+
+            // 创建二维码图片
+            const img = document.createElement('img');
+            img.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+            img.alt = '问卷二维码';
+            img.className = 'img-fluid';
+
+            qrcodeContainer.appendChild(img);
+
+            // 添加下载按钮
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'btn btn-outline-primary mt-3';
+            downloadBtn.innerHTML = '<i class="fas fa-download me-2"></i>下载二维码';
+            downloadBtn.onclick = function() {
+                const link = document.createElement('a');
+                link.href = img.src;
+                link.download = `qrcode_${new Date().getTime()}.png`;
+                link.click();
+            };
+
+            qrcodeContainer.appendChild(downloadBtn);
+        }
+
+        // 显示提示
+        function showToast(message) {
+            const toast = document.createElement('div');
+            toast.className = 'position-fixed bottom-0 end-0 p-3';
+            toast.style.zIndex = '11';
+            toast.innerHTML = `
+                <div class="toast show" role="alert">
+                    <div class="toast-header">
+                        <strong class="me-auto">提示</strong>
+                        <button type="button" class="btn-close" onclick="this.parentElement.parentElement.remove()"></button>
+                    </div>
+                    <div class="toast-body">${message}</div>
+                </div>
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // 如果是邀请码问卷，初始化生成邀请码
+        document.addEventListener('DOMContentLoaded', function() {
+            {% if questionnaire.access_type == 'invite' %}
+            generateInviteCode();
+            {% endif %}
+        });
+    </script>
+</body>
+</html>

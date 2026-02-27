@@ -1,0 +1,118 @@
+<!-- questionnaire/templates/questionnaire/fill.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>填写问卷 - {{ questionnaire.title }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .questionnaire-header { background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
+        .question { margin-bottom: 25px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; }
+        .question-text { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
+        .required { color: red; }
+        .submit-btn { padding: 15px 40px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 18px; cursor: pointer; }
+        .submit-btn:hover { background: #0056b3; }
+        .user-info { background: #e7f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="questionnaire-header">
+        <h1>{{ questionnaire.title }}</h1>
+        <p>{{ questionnaire.description }}</p>
+        <div class="user-info">
+            填写者：{{ request.user.username }} | 请认真填写每个问题
+        </div>
+    </div>
+
+    <form id="surveyForm">
+        {% csrf_token %}
+        {% if is_anonymous_mode %}
+            <input type="hidden" name="anonymous" value="1">
+        {% endif %}
+        {% for question in questions %}
+            <div class="question">
+                <div class="question-text">
+                    {{ forloop.counter }}. {{ question.title }}
+                    {% if question.is_required %}<span class="required">*</span>{% endif %}
+                </div>
+                {% if question.required %}
+                    <small class="text-muted">此题必填</small>
+                {% endif %}
+                {% if question.type == 'text' %}
+                    <input type="hidden" name="maxlen_{{ question.id }}" value="{{ question.max_length }}">
+                    <textarea name="q_{{ question.id }}" rows="4" style="width: 100%;"
+                              {% if question.is_required %}required{% endif %}></textarea>
+                    <small class="text-muted">
+                        {% if question.max_length %}最多 {{ question.max_length }} 字{% else %}字数不限{% endif %}
+                    </small>
+
+                {% elif question.type == 'single' %}
+                    {% for option in question.options %}
+                        <div style="margin-bottom: 8px;">
+                            <input type="radio" name="q_{{ question.id }}" value="{{ forloop.counter0 }}">
+                                   {% if question.is_required %}required{% endif %}>
+                            <label>{{ option }}</label>
+                        </div>
+                    {% endfor %}
+
+                {% elif question.type == 'multiple' %}
+                    {% for option in question.options %}
+                        <div style="margin-bottom: 8px;">
+                            <input type="checkbox" name="q_{{ question.id }}" value="{{ forloop.counter0 }}">
+                            <label>{{ option }}</label>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            </div>
+        {% endfor %}
+
+        <div style="text-align: center; margin-top: 40px;">
+            <button type="button" id="ajaxSubmit" class="submit-btn">提交问卷</button>
+            <p style="margin-top: 10px; color: #666;">提交后不可修改，请确认您的答案</p>
+        </div>
+    </form>
+
+    <script>
+        document.getElementById('ajaxSubmit').addEventListener('click', async () => {
+            const form = document.getElementById('surveyForm');
+            const data = new FormData(form);
+            console.log('>>> 即将发出的 FormData');
+            for (let [k, v] of data.entries()) console.log(k, v);
+            const res = await fetch('{{ request.build_absolute_uri }}submit/', {
+                method: 'POST',
+                body: data,
+                headers: {'X-Requested-With': 'XMLHttpRequest'}
+            });
+            const json = await res.json();
+            console.log('>>> 后端返回', json);
+            if (json.ok) location.href = json.redirect;
+            else alert(json.msg || '提交失败');
+        });
+        /* 简答题字数实时提示 & 超量高亮 */
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('textarea[name^="q_"]').forEach(ta => {
+                const qId   = ta.name.replace('q_', '');
+                const maxLen = Number(document.querySelector(`input[name="maxlen_${qId}"]`)?.value || 0);
+                const info  = document.createElement('div');
+                info.className = 'text-muted small mt-1';
+                ta.after(info);
+                
+                function update() {
+                    const curr = ta.value.length;
+                    info.textContent = maxLen ? `${curr} / ${maxLen}` : '字数不限';
+                    const over = maxLen && curr > maxLen;
+                    // 超量醒目提示
+                    info.style.color = over ? '#dc3545' : '#6c757d';
+                    info.style.fontWeight = over ? 'bold' : 'normal';
+                    ta.style.border = over ? '1px solid #dc3545' : '';
+                    // 禁用提交按钮
+                    document.getElementById('ajaxSubmit').disabled = over;
+                    // ✅ 关键：超量时在文字后面再补一句醒目说明
+                    if (over) info.innerHTML += '&nbsp;<span style="color:#dc3545;font-weight:bold;">（已超出限制，请删减后再提交）</span>';
+                }
+                ta.addEventListener('input', update);
+                update();          // 初始显示
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的回答</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    {% include 'navbar.html' %}
+
+    <div class="container mt-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+                <li class="breadcrumb-item active">我的回答</li>
+            </ol>
+        </nav>
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h1>我的回答记录</h1>
+                <p class="text-muted">共 {{ total_count }} 条回答记录</p>
+            </div>
+        </div>
+
+        {% if responses %}
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>问卷标题</th>
+                                <th>提交时间</th>
+                                <th>问卷状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for response in responses %}
+                            <tr>
+                                <td>
+                                    <strong>{{ response.questionnaire.title|truncatechars:40 }}</strong>
+                                    <br>
+                                    <small class="text-muted">
+                                        创建者: {{ response.questionnaire.creator.username }}
+                                    </small>
+                                </td>
+                                <td>
+                                    {{ response.submitted_at|date:"Y-m-d H:i" }}
+                                    <br>
+                                    <small class="text-muted">
+                                        {{ response.submitted_at|timesince }}前
+                                    </small>
+                                </td>
+                                <td>
+                                    <span class="badge
+                                        {% if response.questionnaire.status == 'published' %}bg-success
+                                        {% elif response.questionnaire.status == 'draft' %}bg-warning
+                                        {% else %}bg-secondary{% endif %}">
+                                        {{ response.questionnaire.get_status_display }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <a href="{% url 'questionnaire_detail' response.questionnaire.id %}"
+                                       class="btn btn-sm btn-outline-primary">
+                                        查看问卷
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="fas fa-inbox fa-4x text-muted mb-4"></i>
+            <h4 class="text-muted">暂无回答记录</h4>
+            <p class="text-muted mb-4">您还没有填写过任何问卷</p>
+            <a href="{% url 'questionnaire_list' %}" class="btn btn-primary">
+                <i class="fas fa-list me-2"></i>查看问卷列表
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

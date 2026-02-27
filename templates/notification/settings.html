@@ -1,0 +1,172 @@
+{% extends 'notification/base.html' %}
+
+{% block title %}通知设置 - 问卷系统{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <!-- 面包屑导航 -->
+        <nav aria-label="breadcrumb" class="mb-4">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'notification_list' %}">通知列表</a></li>
+                <li class="breadcrumb-item active">通知设置</li>
+            </ol>
+        </nav>
+        
+        <!-- 设置表单 -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h4 class="mb-0"><i class="fas fa-cog me-2"></i>通知设置</h4>
+            </div>
+            
+            <div class="card-body">
+                <form method="POST">
+                    {% csrf_token %}
+                    
+                    <!-- 通知类型设置 -->
+                    <div class="mb-4">
+                        <h5 class="border-bottom pb-2 mb-3">接收通知类型</h5>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="receive_questionnaire_updates" 
+                                   name="receive_questionnaire_updates"
+                                   {% if settings.receive_questionnaire_updates %}checked{% endif %}>
+                            <label class="form-check-label" for="receive_questionnaire_updates">
+                                <strong>问卷更新通知</strong>
+                                <p class="text-muted small mb-0">
+                                    当您填写过的问卷有更新时，会收到通知
+                                </p>
+                            </label>
+                        </div>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="receive_system_notifications" 
+                                   name="receive_system_notifications"
+                                   {% if settings.receive_system_notifications %}checked{% endif %}>
+                            <label class="form-check-label" for="receive_system_notifications">
+                                <strong>系统通知</strong>
+                                <p class="text-muted small mb-0">
+                                    接收系统维护、功能更新等通知
+                                </p>
+                            </label>
+                        </div>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="receive_admin_notifications" 
+                                   name="receive_admin_notifications"
+                                   {% if settings.receive_admin_notifications %}checked{% endif %}>
+                            <label class="form-check-label" for="receive_admin_notifications">
+                                <strong>管理员通知</strong>
+                                <p class="text-muted small mb-0">
+                                    接收来自管理员的重要通知
+                                </p>
+                            </label>
+                        </div>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="receive_urgent_notifications" 
+                                   name="receive_urgent_notifications"
+                                   {% if settings.receive_urgent_notifications %}checked{% endif %}>
+                            <label class="form-check-label" for="receive_urgent_notifications">
+                                <strong>紧急通知</strong>
+                                <p class="text-muted small mb-0">
+                                    接收紧急通知（建议保持开启）
+                                </p>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- 通知方式设置 -->
+                    <div class="mb-4">
+                        <h5 class="border-bottom pb-2 mb-3">通知方式</h5>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="push_notifications" 
+                                   name="push_notifications"
+                                   {% if settings.push_notifications %}checked{% endif %}>
+                            <label class="form-check-label" for="push_notifications">
+                                <strong>站内推送</strong>
+                                <p class="text-muted small mb-0">
+                                    在网站内接收推送通知
+                                </p>
+                            </label>
+                        </div>
+                        
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" 
+                                   id="email_notifications" 
+                                   name="email_notifications"
+                                   {% if settings.email_notifications %}checked{% endif %}>
+                            <label class="form-check-label" for="email_notifications">
+                                <strong>邮件通知</strong>
+                                <p class="text-muted small mb-0">
+                                    通过邮件接收通知（需要配置邮件服务器）
+                                </p>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- 注意事项 -->
+                    <div class="alert alert-info">
+                        <div class="d-flex">
+                            <div class="me-3">
+                                <i class="fas fa-info-circle fa-2x"></i>
+                            </div>
+                            <div>
+                                <h6 class="alert-heading">重要提示</h6>
+                                <ul class="mb-0">
+                                    <li>无论设置如何，紧急通知都会发送给您</li>
+                                    <li>系统重要更新和安全隐患通知不受设置限制</li>
+                                    <li>您可以在任何时候修改这些设置</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 操作按钮 -->
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'notification_list' %}" class="btn btn-outline-secondary">
+                            <i class="fas fa-arrow-left me-1"></i>返回列表
+                        </a>
+                        
+                        <div>
+                            <button type="button" class="btn btn-outline-danger me-2" 
+                                    onclick="resetToDefaults()">
+                                <i class="fas fa-undo me-1"></i>恢复默认
+                            </button>
+                            
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-1"></i>保存设置
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+function resetToDefaults() {
+    if (confirm('确定要恢复默认设置吗？')) {
+        // 设置所有开关为默认值
+        document.getElementById('receive_questionnaire_updates').checked = true;
+        document.getElementById('receive_system_notifications').checked = true;
+        document.getElementById('receive_admin_notifications').checked = true;
+        document.getElementById('receive_urgent_notifications').checked = true;
+        document.getElementById('push_notifications').checked = true;
+        document.getElementById('email_notifications').checked = false;
+        
+        // 提示用户需要保存
+        alert('已恢复默认设置，请点击"保存设置"按钮保存更改。');
+    }
+}
+</script>
+{% endblock %}
+{% endblock %}

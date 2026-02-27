@@ -1,0 +1,54 @@
+{% load static %}
+{% if request.user.is_authenticated %}
+<li class="nav-item dropdown">
+    <a class="nav-link dropdown-toggle position-relative" href="#" id="notificationDropdown" 
+       role="button" data-bs-toggle="dropdown" aria-expanded="false">
+        <i class="fas fa-bell"></i>
+        {% if unread_count > 0 %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                {{ unread_count }}
+                <span class="visually-hidden">未读消息</span>
+            </span>
+        {% endif %}
+    </a>
+    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="notificationDropdown" style="min-width: 300px;">
+        <li>
+            <h6 class="dropdown-header">最近通知</h6>
+        </li>
+        {% if recent_notifications %}
+            {% for notification in recent_notifications %}
+            <li>
+                <a class="dropdown-item {% if not notification.is_read %}fw-bold{% endif %}" 
+                   href="{% url 'notification_detail' notification.id %}">
+                    <div class="d-flex w-100 justify-content-between">
+                        <small>{{ notification.title|truncatechars:30 }}</small>
+                        <small class="text-muted">{{ notification.time_since }}</small>
+                    </div>
+                    <small class="text-muted">{{ notification.message|truncatechars:40 }}</small>
+                </a>
+            </li>
+            {% endfor %}
+        {% else %}
+        <li><a class="dropdown-item text-muted" href="#">暂无通知</a></li>
+        {% endif %}
+        <li><hr class="dropdown-divider"></li>
+        <li>
+            <a class="dropdown-item" href="{% url 'notification_list' %}">
+                <i class="fas fa-list me-1"></i>查看所有通知
+            </a>
+        </li>
+        {% if unread_count > 0 %}
+        <li>
+            <a class="dropdown-item" href="{% url 'mark_all_read' %}">
+                <i class="fas fa-check-double me-1"></i>标记所有为已读
+            </a>
+        </li>
+        {% endif %}
+        <li>
+            <a class="dropdown-item" href="{% url 'notification_settings' %}">
+                <i class="fas fa-cog me-1"></i>通知设置
+            </a>
+        </li>
+    </ul>
+</li>
+{% endif %}

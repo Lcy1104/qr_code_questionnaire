@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>问卷二维码 - {{ questionnaire.title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .qr-container {
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            background: white;
+        }
+        .qr-code {
+            width: 300px;
+            height: 300px;
+            margin: 20px auto;
+            display: block;
+        }
+        .invite-code {
+            font-family: monospace;
+            font-size: 1.2rem;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .invite-code:hover {
+            background: #e9ecef;
+        }
+    </style>
+</head>
+<body>
+    {% include 'navbar.html' %}
+
+    <div class="container mt-4">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">仪表盘</a></li>
+                <li class="breadcrumb-item"><a href="{% url 'questionnaire_list' %}">问卷列表</a></li>
+                <li class="breadcrumb-item active">问卷二维码</li>
+            </ol>
+        </nav>
+
+        <div class="qr-container">
+            <div class="text-center mb-4">
+                <h3>{{ questionnaire.title }}</h3>
+                <p class="text-muted">{{ questionnaire.description|default:"没有描述" }}</p>
+            </div>
+
+            <div class="text-center">
+                <img src="{{ qr_code_base64 }}" alt="问卷二维码" class="qr-code">
+
+                <div class="mb-3">
+                    <p class="mb-1">问卷链接：</p>
+                    <input type="text" class="form-control text-center" value="{{ survey_url }}" readonly
+                           onclick="this.select()">
+                    <small class="text-muted">点击链接选中，可复制</small>
+                </div>
+
+                {% if questionnaire.access_type == 'invite' and questionnaire.invite_code %}
+                <div class="mb-3">
+                    <p class="mb-1">邀请码：</p>
+                    <div class="invite-code" onclick="toggleInviteCode(this)"
+                         data-code="{{ questionnaire.invite_code }}">
+                        <span class="placeholder">点击显示邀请码</span>
+                        <span class="code" style="display: none;">{{ questionnaire.invite_code }}</span>
+                    </div>
+                    <small class="text-muted">点击显示/隐藏邀请码</small>
+                </div>
+                {% endif %}
+
+                <div class="alert alert-info">
+                    <h6><i class="fas fa-info-circle me-2"></i>说明：</h6>
+                    <ul class="mb-0">
+                        <li>右键点击二维码图片可保存到本地</li>
+                        <li>您也可以分享上面的链接给参与者</li>
+                        <li>问卷已发布，参与者现在可以访问并填写</li>
+                    </ul>
+                </div>
+
+                <div class="mt-4">
+                    <a href="{% url 'questionnaire_list' %}" class="btn btn-primary">
+                        <i class="fas fa-list me-1"></i>返回问卷列表
+                    </a>
+                    <a href="{% url 'questionnaire_detail' questionnaire.id %}" class="btn btn-outline-secondary ms-2">
+                        <i class="fas fa-chart-bar me-1"></i>查看统计
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 切换邀请码显示/隐藏
+        function toggleInviteCode(element) {
+            const placeholder = element.querySelector('.placeholder');
+            const code = element.querySelector('.code');
+
+            if (placeholder.style.display !== 'none') {
+                placeholder.style.display = 'none';
+                code.style.display = 'inline';
+            } else {
+                placeholder.style.display = 'inline';
+                code.style.display = 'none';
+            }
+        }
+
+        // 自动尝试下载二维码
+        window.onload = function() {
+            const qrCodeImg = document.querySelector('.qr-code');
+            if (qrCodeImg) {
+                setTimeout(() => {
+                    try {
+                        const link = document.createElement('a');
+                        link.href = qrCodeImg.src;
+                        link.download = 'qrcode_{{ questionnaire.title }}.png';
+                        link.style.display = 'none';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+
+                        // 显示下载提示
+                        const alertDiv = document.createElement('div');
+                        alertDiv.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 end-0 m-3';
+                        alertDiv.style.zIndex = '1050';
+                        alertDiv.innerHTML = `
+                            <i class="fas fa-download me-2"></i>二维码已开始下载
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        `;
+                        document.body.appendChild(alertDiv);
+
+                        // 3秒后自动移除提示
+                        setTimeout(() => {
+                            alertDiv.remove();
+                        }, 3000);
+                    } catch (error) {
+                        console.log('二维码自动下载失败，用户可以手动保存：', error);
+                    }
+                }, 1000);
+            }
+        };
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
