@@ -190,6 +190,17 @@
                                         {{ form.max_responses }}
                                         <div class="form-text">设置问卷最多能收集的答卷数量</div>
                                     </div>
+                                    <div class="mb-3" id="multiQrcodeField" style="display: none;">
+    <div class="form-check">
+        <input type="checkbox" name="enable_multi_qrcodes" id="enable_multi_qrcodes" class="form-check-input" {% if questionnaire.enable_multi_qrcodes %}checked{% endif %}>
+        <label class="form-check-label" for="enable_multi_qrcodes">
+            生成多个一次性二维码（每个二维码仅限一人填写，数量等于最大提交份数）
+        </label>
+    </div>
+    <div class="form-text text-muted">
+        启用后，系统将自动生成与最大提交份数相等数量的独立二维码，每个二维码只能被使用一次。
+    </div>
+</div>
                                 </div>
                                 <!-- 添加max_length字段（隐藏） -->
                                 <div class="mb-3 d-none">
@@ -1231,12 +1242,36 @@ document.addEventListener('DOMContentLoaded', function() {
 // 控制最大提交份数输入框的显示/隐藏
 const limitCheckbox = document.querySelector('[name="limit_responses"]');
 const maxField = document.getElementById('maxResponsesField');
+const multiField = document.getElementById('multiQrcodeField');
 
 function toggleMaxField() {
     if (maxField) {
-        maxField.style.display = limitCheckbox && limitCheckbox.checked ? 'block' : 'none';
+        const isChecked = limitCheckbox && limitCheckbox.checked;
+        maxField.style.display = isChecked ? 'block' : 'none';
+        // 取消勾选时清空输入框，避免提交旧值
+        if (!isChecked) {
+            const maxInput = maxField.querySelector('input');
+            if (maxInput) {
+                maxInput.value = '';
+            }
+        }
     }
 }
+function toggleMultiQrcodeField() {
+    if (multiField) {
+        multiField.style.display = (limitCheckbox && limitCheckbox.checked) ? 'block' : 'none';
+    }
+}
+
+if (limitCheckbox) {
+    limitCheckbox.addEventListener('change', function() {
+        toggleMaxField();
+        toggleMultiQrcodeField();  // 新增
+    });
+    toggleMaxField();
+    toggleMultiQrcodeField();  // 初始化
+}
+
 if (limitCheckbox) {
     limitCheckbox.addEventListener('change', toggleMaxField);
     toggleMaxField(); // 初始化

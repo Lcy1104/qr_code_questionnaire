@@ -311,10 +311,10 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
                     </div>
                     <div class="card-body">
                         <p><strong>访问次数:</strong> {{ questionnaire.view_count }}</p>
-                        <p><strong>提交次数:</strong> <span id="submit-count">{{ questionnaire.submit_count }}</span></p>
-                            {% if questionnaire.limit_responses %}
-                                / {{ questionnaire.max_responses }}
-                            {% endif %}
+                        <p style="white-space: nowrap;">
+                            <strong>提交次数:</strong>
+                            <span id="submit-count">{{ current_version_submit_count|default:responses.count }}</span>
+                            {% if questionnaire.limit_responses %}&nbsp;/&nbsp;{{ questionnaire.max_responses }}{% endif %}
                         </p>
                         <!-- 新增开始时间 -->
                         <p><strong>开始时间:</strong>
@@ -385,7 +385,7 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
                                     <p class="text-muted small">此问卷需要邀请码才能访问</p>
                                 {% endif %}
                             {% endif %}
-                            
+
                             <!-- 二维码区域：根据是否启用多二维码显示不同内容 -->
                             {% if questionnaire.enable_multi_qrcodes %}
                                 <!-- 多二维码列表 -->
@@ -492,7 +492,7 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
 
                         </div>
                         <hr>
-                        
+
                         <!-- 通知相关链接 -->
                         <div class="mb-3">
                             <h6>通知相关</h6>
@@ -510,9 +510,9 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
                                 {% endif %}
                             </div>
                         </div>
-                        
+
                         <hr>
-                        
+
                         <h6>最近回答</h6>
                         {% if responses %}
                         <div class="list-group list-group-flush">
@@ -644,8 +644,12 @@ console.log("前端调试: has_available_qrcode =", {{ has_available_qrcode|yesn
 </script>
 
     <script>
+        console.log('初始提交次数:', {{ current_version_submit_count|default:"'undefined'" }});
     // ============ 问卷更新相关函数 ============
+    const endTimeStr = '{{ end_time_iso|default:'' }}';
+    const nowStr = '{{ now_iso }}';
     const questionnaireId = '{{ questionnaire.id }}';
+    const templateUserHasSubmitted = {{ user_has_submitted|yesno:"true,false" }};
     const csrfToken = getCookie('csrftoken');
     const checkUpdateUrl = "{% url 'check_questionnaire_update' questionnaire.id %}";
     const acknowledgeUpdateUrl = "{% url 'acknowledge_update' questionnaire.id %}";
@@ -691,7 +695,7 @@ function showUpdateNotification(data) {
         message.textContent = "问卷有更新";
         versionInfo.textContent = "请查看最新版本";
     }
-    
+
     container.style.display = 'block';
 
     // 10秒后自动隐藏
@@ -721,7 +725,7 @@ function showUpdateNotification(data) {
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
-        fetch(acknowledgeUpdateUrl, {  
+        fetch(acknowledgeUpdateUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -752,7 +756,7 @@ function showUpdateNotification(data) {
     // 标记所有通知为已读
     function markAllAsRead() {
         if (!confirm('确定要标记所有通知为已读吗？')) return;
-        
+
         fetch('/notifications/mark-all-read/', {
             method: 'POST',
             headers: {
@@ -786,12 +790,12 @@ function showUpdateNotification(data) {
                     if (window.lastUnreadCount === undefined) {
                         window.lastUnreadCount = 0;
                     }
-                    
+
                     if (data.unread_count > window.lastUnreadCount) {
                         // 新通知到达
                         showNewNotificationAlert(data.unread_count - window.lastUnreadCount);
                     }
-                    
+
                     window.lastUnreadCount = data.unread_count;
                 }
             })
@@ -803,11 +807,11 @@ function showUpdateNotification(data) {
     // 显示新通知提醒
     function showNewNotificationAlert(count) {
         const container = document.getElementById('realTimeNotifications');
-        
+
         const alertDiv = document.createElement('div');
         alertDiv.className = 'alert alert-info alert-dismissible fade show';
         alertDiv.style.cssText = 'animation: slideInDown 0.5s ease-out; margin-bottom: 10px;';
-        
+
         alertDiv.innerHTML = `
             <div class="d-flex align-items-center">
                 <i class="fas fa-bell fa-lg me-3"></i>
@@ -819,16 +823,16 @@ function showUpdateNotification(data) {
                     <button type="button" class="btn btn-sm btn-primary" onclick="location.href='/notifications/'">
                         查看
                     </button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" 
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1"
                             onclick="this.closest('.alert').remove()">
                         忽略
                     </button>
                 </div>
             </div>
         `;
-        
+
         container.appendChild(alertDiv);
-        
+
         // 5秒后自动消失
         setTimeout(() => {
             if (alertDiv.parentNode) {
@@ -843,7 +847,7 @@ function showUpdateNotification(data) {
     }
 
     // ============ 工具函数 ============
-    
+
     // 显示成功消息
     function showSuccessMessage(msg) {
         const existingAlert = document.querySelector('.success-alert');
@@ -888,7 +892,7 @@ function showUpdateNotification(data) {
     }
 
     // ============ 原有的问卷相关函数 ============
-    
+
     function toggleInviteCode() {
         const container = document.getElementById('inviteCodeContainer');
         const btn = document.getElementById('inviteCodeBtn');
@@ -900,7 +904,7 @@ function showUpdateNotification(data) {
             btn.textContent = '点击显示邀请码';
         }
     }
-    
+
     function copyInviteCode() {
         const input = document.getElementById('inviteCodeInput');
         input.select();
@@ -921,7 +925,7 @@ function showUpdateNotification(data) {
     }
 
     // ============ 发布问卷相关函数 ============
-    
+
     document.getElementById('accessType').addEventListener('change', function() {
         const inviteCodeSection = document.getElementById('inviteCodeSection');
         if (this.value === 'invite') {
@@ -940,13 +944,13 @@ tooltipTriggerList.map(function (tooltipTriggerEl) {
         if (accessTypeSelect && accessTypeSelect.value === 'invite') {
             document.getElementById('inviteCodeSection').style.display = 'block';
         }
-        
+
         // 页面加载后检查更新
         setTimeout(checkForUpdate, 1000);
-        
+
         // 每30秒检查一次新通知
         setInterval(checkNewNotifications, 30000);
-        
+
         // 立即检查一次新通知
         checkNewNotifications();
 
@@ -970,7 +974,7 @@ tooltipTriggerList.map(function (tooltipTriggerEl) {
         }
     }
     // 如果没有存储数据，则通过 API 获取
-    fetchLatestData();
+    //fetchLatestData();
     });
     // WebSocket 连接（问卷二维码更新）
 (function() {
@@ -992,18 +996,22 @@ tooltipTriggerList.map(function (tooltipTriggerEl) {
         updateQRCodeUI(data.qr_code_id, data.is_used, data.used_by, data.used_at, data.response_id);
     } else if (data.type === 'questionnaire_updated') {
         // 无条件更新问题列表、按钮状态、统计信息
+        if (data.version) {
+        document.getElementById('questionnaire-version').value = data.version;
+        console.log('更新 version 为', data.version);
+    }
         if (data.questions) {
             console.log('更新问题列表，问题数量:', data.questions.length);
             updateQuestionsUI(data.questions);
         }
         if (data.has_available_qrcode !== undefined) {
             // 注意：user_has_submitted 可能不准确，用按钮当前状态
-            const fillBtn = document.getElementById('fill-questionnaire-btn');
-            const isSubmitted = fillBtn ? fillBtn.hasAttribute('disabled') : false;
-            updateButtonUI(data.has_available_qrcode, isSubmitted);
+            console.log('收到 user_has_submitted =', data.user_has_submitted);  // 添加日志
+            var userSubmitted = data.user_has_submitted === true || data.user_has_submitted === 'true';
+            updateButtonUI(data.has_available_qrcode, userSubmitted);
         }
         if (data.submit_count !== undefined) {
-            updateStatsUI(data.submit_count);
+            //updateStatsUI(data.submit_count);
         }
     }
 };
@@ -1232,6 +1240,7 @@ function fetchLatestData() {
     fetch(`/api/questionnaires/${questionnaireId}/detail/`)
         .then(response => response.json())
         .then(data => {
+            console.log('API返回完整数据:', data);
             if (data.success) {
                 // 更新问题列表
                 updateQuestionsUI(data.questions);
@@ -1316,8 +1325,42 @@ function updateQuestionsUI(questions) {
         // 更新内容
         let html = '';
         questions.forEach((q, index) => {
-            // ... 同上生成 HTML ...
+    html += `<div class="list-group-item">`;
+    html += `<div class="d-flex w-100 justify-content-between align-items-center">`;
+    html += `<h6 class="mb-1">${index + 1}. ${q.text}</h6>`;
+    html += `<div class="d-flex align-items-center">`;
+    html += `<small class="text-muted me-3">${getQuestionTypeDisplay(q.question_type)}</small>`;
+    if (q.answer_items.count > 0) {
+        html += `<span class="badge bg-warning me-2" title="此问题已有回答记录">${q.answer_set.count} 个回答</span>`;
+    }
+    html += `<a href="/question/${q.id}/versions/" class="btn btn-sm btn-outline-info" title="查看版本历史"><i class="fas fa-history"></i></a>`;
+    html += `</div></div>`;
+
+    if (q.question_type === 'radio' || q.question_type === 'checkbox') {
+        html += `<div class="mt-2"><small class="text-muted">选项:</small><div class="mt-1">`;
+        let options = q.options;
+        if (typeof options === 'string') {
+            try { options = JSON.parse(options); } catch (e) { options = []; }
+        }
+        if (!Array.isArray(options)) options = [];
+        options.forEach(opt => {
+            html += `<div class="form-check">`;
+            html += `<input class="form-check-input" type="${q.question_type}" disabled>`;
+            html += `<label class="form-check-label">${opt}</label>`;
+            html += `</div>`;
         });
+        html += `</div></div>`;
+    } else if (q.question_type === 'text') {
+        html += `<div class="mt-2"><textarea class="form-control" rows="2" placeholder="简答题回答区域" disabled></textarea>`;
+        if (q.max_length > 0) {
+            html += `<small class="text-muted">字数限制: ${q.max_length}字</small>`;
+        }
+        html += `</div>`;
+    }
+
+    html += `<div class="mt-2"><small class="text-muted">${q.required ? '必填' : '选填'}</small></div>`;
+    html += `</div>`;
+});
         container.innerHTML = html;
         console.log('【DEBUG】列表容器已更新');
     }
@@ -1330,14 +1373,86 @@ function getQuestionTypeDisplay(type) {
 }
 
 // 更新填写按钮状态
-function updateButtonUI(hasQrcode, userSubmitted) {
+function updateButtonUI(hasQrcode, userSubmittedFromMsg) {
+    // ========== 前端实时判断问卷是否截止 ==========
+    let isEnded = false;
+
+    // 优先使用后端传递的 ISO 字符串（如果存在且非空）
+    if (typeof endTimeStr !== 'undefined' && endTimeStr && endTimeStr.trim() !== '') {
+        const endTime = new Date(endTimeStr);
+        const now = new Date(nowStr);
+        isEnded = now > endTime;
+        console.log('使用后端时间: 截止时间=', endTimeStr, '当前时间=', nowStr, '是否截止=', isEnded);
+    } else {
+        // 后端变量为空，尝试从页面获取截止时间文本（基于右侧统计信息）
+        const paragraphs = document.querySelectorAll('.col-md-4 .card-body p');
+        let endTimeFromPage = null;
+        for (let p of paragraphs) {
+            if (p.innerText.includes('截止时间:')) {
+                const match = p.innerText.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+                if (match) {
+                    // 转换为 Date 对象，注意格式：'2026-03-04 17:27' -> '2026-03-04T17:27'
+                    endTimeFromPage = new Date(match[0].replace(' ', 'T'));
+                }
+                break;
+            }
+        }
+        if (endTimeFromPage) {
+            const now = new Date(); // 使用客户端当前时间
+            isEnded = now > endTimeFromPage;
+            console.log('使用页面时间: 截止时间=', endTimeFromPage.toISOString(), '当前客户端时间=', now.toISOString(), '是否截止=', isEnded);
+        } else {
+            console.log('无法获取截止时间，视为未截止');
+        }
+    }
+
+    let userSubmitted;
+
+    if (isEnded) {
+        userSubmitted = true;
+        console.log('问卷已截止，强制禁用');
+    } else {
+        // ========== 版本比较：获取问卷当前版本和用户已提交版本 ==========
+        const versionEl = document.getElementById('questionnaire-version');
+        const userVersionEl = document.getElementById('user-latest-version');
+        let currentVersion = 0, userVersion = 0;
+        if (versionEl && userVersionEl) {
+            currentVersion = parseInt(versionEl.value) || 0;
+            userVersion = parseInt(userVersionEl.value) || 0;
+            console.log('版本比较: current=', currentVersion, 'user=', userVersion);
+        }
+
+        // ========== 基于版本比较强制纠正 userSubmitted ==========
+        if (userVersion === 0) {
+            if (currentVersion > 1) {
+                userSubmitted = false;  // 问卷已更新，允许重新填写
+                updateStatsUI(0);
+                console.log('版本回退: userVersion=0 且问卷更新，强制设为 false');
+            } else {
+                userSubmitted = templateUserHasSubmitted;  // 问卷未更新，使用模板值
+                console.log('版本回退: userVersion=0，使用模板值', userSubmitted);
+            }
+        } else if (currentVersion > userVersion) {
+            userSubmitted = false;  // 问卷更新，允许填写
+            updateStatsUI(0);
+            console.log('版本覆盖: 问卷更新，强制设为 false');
+        } else if (currentVersion === userVersion && userVersion > 0) {
+            userSubmitted = true;   // 版本相同且有提交记录，禁用
+            console.log('版本覆盖: 版本相同且有提交记录，强制设为 true');
+        } else {
+            userSubmitted = templateUserHasSubmitted;  // 其他异常情况回退模板值
+            console.log('版本异常，回退模板值', userSubmitted);
+        }
+    }
+
+    console.log('updateButtonUI: hasQrcode=', hasQrcode, 'userSubmitted=', userSubmitted);
+
+    // ========== 按钮样式处理（以下代码完全保留您原有的实现） ==========
     const fillBtn = document.getElementById('fill-questionnaire-btn');
     if (!fillBtn) {
         console.log('updateButtonUI: 按钮元素不存在');
         return;
     }
-
-    console.log('updateButtonUI: hasQrcode=', hasQrcode, 'userSubmitted=', userSubmitted);
 
     fillBtn.classList.remove('btn-success', 'btn-secondary', 'disabled');
 
@@ -1346,10 +1461,8 @@ function updateButtonUI(hasQrcode, userSubmitted) {
         fillBtn.setAttribute('disabled', 'disabled');
         fillBtn.setAttribute('title', '您已填写过此问卷');
         fillBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i>填写问卷';
-        // 如果是 <a> 标签，移除 href 并改为按钮
         if (fillBtn.tagName === 'A') {
             fillBtn.removeAttribute('href');
-            // 替换为 <button> 保持一致性
             const newBtn = document.createElement('button');
             newBtn.id = 'fill-questionnaire-btn';
             newBtn.className = fillBtn.className;
@@ -1378,7 +1491,6 @@ function updateButtonUI(hasQrcode, userSubmitted) {
         fillBtn.removeAttribute('disabled');
         fillBtn.setAttribute('title', '');
         fillBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i>填写问卷';
-        // 确保是 <a> 标签，并且 href 正确
         if (fillBtn.tagName !== 'A') {
             const newLink = document.createElement('a');
             newLink.id = 'fill-questionnaire-btn';
@@ -1392,19 +1504,29 @@ function updateButtonUI(hasQrcode, userSubmitted) {
     }
 }
 
-// 更新统计信息（提交次数等）
+// 更新统计信息（提交次数等）- 改进版：避免被0覆盖
 function updateStatsUI(submitCount) {
     const submitCountSpan = document.getElementById('submit-count');
-    if (submitCountSpan) {
+    if (!submitCountSpan) return;
+
+    // 确保 submitCount 是有效的数字，否则不更新
+    if (typeof submitCount === 'number' && !isNaN(submitCount)) {
         submitCountSpan.textContent = submitCount;
+        console.log('提交次数更新为', submitCount);
+    } else {
+        console.warn('updateStatsUI: 忽略无效的提交次数', submitCount);
+        // 可以选择保留原值，不做任何操作
     }
 }
 // 在页面加载后调用
 document.addEventListener('DOMContentLoaded', function() {
     if (!window.__data_loaded_from_storage) {
-        //fetchLatestData(); // 只有未从存储加载时才执行
+        fetchLatestData(); // 只有未从存储加载时才执行
     }
 });
 </script>
+    <input type="hidden" id="questionnaire-version" value="{{ questionnaire.version }}">
+    <input type="hidden" id="user-latest-version" value="{{ latest_response_version|default:0 }}">
+    <p>模板变量 user_has_submitted: {{ user_has_submitted }}</p>
 </body>
 </html>

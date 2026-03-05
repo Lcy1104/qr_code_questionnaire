@@ -697,3 +697,4 @@ def build_stats(questionnaire):
 
 
 #detail.html问卷详细页删除问卷应该转回问卷管理页而不是原页面！，1.29待完善
+#uvicorn qr_code_questionaire.asgi:application --host 0.0.0.0 --port 8000

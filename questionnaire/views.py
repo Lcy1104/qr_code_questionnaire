@@ -9,11 +9,14 @@ from django import forms
 from .models import Questionnaire, Question,Answer,Notification, NotificationSettings,Response
 from .version_manager import VersionManager
 from .notification_manager import NotificationManager
+from .views_qrcode import generate_qrcode_for_questionnaire, generate_multi_qrcodes_for_questionnaire
 from django.http import JsonResponse
 from django.db.models import Avg, Count
 from django.utils import timezone
 from datetime import timedelta
 import json
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 import logging
 logger = logging.getLogger(__name__)
 
@@ -246,9 +249,9 @@ def edit_questionnaire(request, questionnaire_id):
     #只允许问卷创建者访问，请启用上文
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
 
-    logger.info(f"[EDIT] 用户 {request.user.username} 尝试编辑问卷 {questionnaire_id}")
-    logger.info(f"[EDIT] 问卷创建者: {questionnaire.creator.username}")
-    logger.info(f"[EDIT] 当前用户是管理员吗? {request.user.is_admin}")
+    #logger.info(f"[EDIT] 用户 {request.user.username} 尝试编辑问卷 {questionnaire_id}")
+    #logger.info(f"[EDIT] 问卷创建者: {questionnaire.creator.username}")
+    #logger.info(f"[EDIT] 当前用户是管理员吗? {request.user.is_admin}")
 
     # 检查权限：问卷创建者或管理员可以编辑
     if questionnaire.creator != request.user and not request.user.is_admin:
@@ -396,6 +399,9 @@ def edit_questionnaire(request, questionnaire_id):
                 questionnaire.status = 'draft'
                 logger.info(f"[EDIT] 保存草稿，状态: {questionnaire.status}")
 
+            if questionnaire.access_type != 'invite':
+                questionnaire.invite_code = None
+
             questionnaire.save()
 
             # 关键修改：完全手动处理每个问题的保存，确保新问题被保存
@@ -517,6 +523,45 @@ def edit_questionnaire(request, questionnaire_id):
                 messages.error(request, f'保存失败: {str(e)}')
                 return redirect('edit_questionnaire', questionnaire.id)
 
+            if save_action == 'save_and_publish':
+                # 先删除该问卷下所有旧的二维码，确保数量与当前设置匹配
+                from .models import QuestionnaireQRCode
+                QuestionnaireQRCode.objects.filter(questionnaire=questionnaire).delete()
+                if questionnaire.enable_multi_qrcodes and questionnaire.max_responses:
+                    generate_multi_qrcodes_for_questionnaire(request, questionnaire)
+                else:
+                    generate_qrcode_for_questionnaire(request, questionnaire)
+                # 计算用户是否已提交当前版本
+                latest_response = Response.objects.filter(
+                    questionnaire=questionnaire,
+                    user=request.user,
+                    is_submitted=True
+                ).order_by('-submitted_at').first()
+                '''
+                if latest_response and latest_response.questionnaire_version == questionnaire.version:
+                    user_has_submitted = True
+                else:
+                    user_has_submitted = False
+                '''
+                user_has_submitted = False
+                # 计算可用二维码
+                if questionnaire.enable_multi_qrcodes:
+                    has_available_qrcode = questionnaire.qrcodes.filter(is_used=False).exists()
+                else:
+                    has_available_qrcode = bool(questionnaire.qr_code)
+
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f'questionnaire_{questionnaire.id}',
+                    {
+                        'type': 'questionnaire_updated',
+                        'questionnaire_id': str(questionnaire.id),
+                        'has_available_qrcode': has_available_qrcode,
+                        #'user_has_submitted': user_has_submitted,
+                        'submit_count': questionnaire.submit_count,
+                        'version': questionnaire.version,  # 新增
+                    }
+                )
             # 保存成功消息
             if has_modifications:
                 messages.success(request, f'问卷已保存！版本号: {questionnaire.version}')
@@ -709,6 +754,12 @@ def questionnaire_detail(request, questionnaire_id):
         is_submitted=True
     )
 
+    current_version_submit_count = Response.objects.filter(
+        questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True
+    ).count()
+
     # 获取可视化统计数据和图表
     stats = get_questionnaire_stats(questionnaire_id)
 
@@ -720,6 +771,32 @@ def questionnaire_detail(request, questionnaire_id):
     visualizer = QuestionnaireVisualizer(questionnaire_id)
     charts_html = visualizer.generate_dashboard_html()
 
+    user_has_submitted = False
+    latest_response_version = 0
+    if request.user.is_authenticated:
+        latest_response = Response.objects.filter(
+            questionnaire=questionnaire,
+            user=request.user,
+            is_submitted=True
+        ).order_by('-submitted_at').first()
+        if latest_response:
+            user_has_submitted = True
+            latest_response_version = latest_response.questionnaire_version
+            if latest_response_version == 0:
+                latest_response_version = 1
+                print("DEBUG: 版本号修正为 1")
+            print(f"DEBUG: 找到提交记录，版本 = {latest_response_version}")  # 调试输出
+        else:
+            print("DEBUG: 未找到提交记录")
+
+    print(f"DEBUG: user_has_submitted = {user_has_submitted}")
+
+    now = timezone.now()
+    is_ended = questionnaire.end_time and questionnaire.end_time < now
+    print(f"DEBUG: is_ended = {is_ended}, end_time = {questionnaire.end_time}, now = {timezone.now()}")
+    # 传递截止时间的 ISO 字符串和当前时间的 ISO 字符串（供前端比较）
+    end_time_iso = questionnaire.end_time.isoformat() if questionnaire.end_time else None
+    now_iso = timezone.now().isoformat()
     return render(request, 'questionnaire/detail.html', {
         'questionnaire': questionnaire,
         'responses': responses,
@@ -727,7 +804,14 @@ def questionnaire_detail(request, questionnaire_id):
         'charts_html': charts_html,
         'detailed_stats': detailed_stats,
         'response_count': responses.count(),
-        'is_admin': request.user.is_admin
+        'is_admin': request.user.is_admin,
+        'latest_response_version': latest_response_version,
+        'user_has_submitted': user_has_submitted,
+        'is_ended': is_ended,
+        'end_time_iso': end_time_iso,
+        'now_iso': now_iso,
+        'submit_count': responses.count(),
+        'current_version_submit_count': current_version_submit_count,
     })
 
 

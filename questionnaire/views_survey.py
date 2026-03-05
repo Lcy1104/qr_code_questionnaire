@@ -29,7 +29,6 @@ def survey_landing(request, survey_uuid):
             'reason': '问卷未发布' if questionnaire.status == 'draft' else '问卷已结束'
         })
 
-
     context = {
         'questionnaire': questionnaire,
         'user_is_authenticated': request.user.is_authenticated,
