@@ -415,6 +415,34 @@ def questionnaire_detail(request, questionnaire_id):
     print(f"问题数量: {len(questions)}")
     print(f"has_available_qrcode: {has_available_qrcode}")
 
+    # 计算当前问卷版本的提交次数（包含匿名用户）
+    current_version_submit_count = Response.objects.filter(
+        questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True
+    ).count()
+
+    # 获取当前用户的最新提交版本和提交状态
+    user_has_submitted = False
+    latest_response_version = 0
+    if request.user.is_authenticated:
+        latest_response = Response.objects.filter(
+            questionnaire=questionnaire,
+            user=request.user,
+            is_submitted=True
+        ).order_by('-submitted_at').first()
+        if latest_response:
+            user_has_submitted = True
+            latest_response_version = latest_response.questionnaire_version
+            # 修正版本号 0 的问题
+            if latest_response_version == 0:
+                latest_response_version = 1
+
+    # 计算截止时间和当前时间的 ISO 字符串（供前端判断）
+    now = timezone.now()
+    end_time_iso = questionnaire.end_time.isoformat() if questionnaire.end_time else None
+    now_iso = now.isoformat()
+
     # 返回模板，保留原有所有模板变量
     return render(request, 'questionnaire/detail.html', {
         'questionnaire': questionnaire,
@@ -428,6 +456,11 @@ def questionnaire_detail(request, questionnaire_id):
         'now': now,
         # 保留原有 just_created 变量（用于模板自动刷新脚本，但可能已不再需要）
         'just_created': request.session.pop('just_created', None) == str(questionnaire_id),
+        'current_version_submit_count': current_version_submit_count,
+        'user_has_submitted': user_has_submitted,
+        'latest_response_version': latest_response_version,
+        'end_time_iso': end_time_iso,
+        'now_iso': now_iso,
     })
 
 @login_required
