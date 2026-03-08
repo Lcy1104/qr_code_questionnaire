@@ -2,8 +2,9 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.core.exceptions import ValidationError
 from django.contrib.auth import get_user_model
-from .models import Questionnaire, Question
+from .models import Questionnaire, Question, Response, QuestionnaireQRCode
 from django.utils import timezone
+import json
 
 User = get_user_model()
 
@@ -116,12 +117,19 @@ class QuestionnaireForm(forms.ModelForm):
         widget=forms.CheckboxInput(attrs={'class': 'form-check-input'}),
         label='生成多个一次性二维码'
     )
+    targets = forms.CharField(
+        widget=forms.Textarea(attrs={'rows': 4, 'class': 'form-control', 'placeholder': '每行一个人名'}),
+        required=False,
+        label='评价目标列表',
+        help_text='输入可被评价的人名，每行一个。留空表示无需选择目标。'
+    )
+
     class Meta:
         model = Questionnaire
         fields = [
             'title', 'description', 'access_type',
             'start_time', 'end_time', 'limit_responses', 'max_responses',
-            'enable_multi_qrcodes',  # 新增
+            'enable_multi_qrcodes', 'targets', # 新增
         ]
         widgets = {
             'title': forms.TextInput(attrs={'class': 'form-control'}),
@@ -129,6 +137,29 @@ class QuestionnaireForm(forms.ModelForm):
             'access_type': forms.Select(attrs={'class': 'form-select'}),
             'max_length': forms.NumberInput(attrs={'class': 'form-control'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk and self.instance.targets:
+            # 将列表转换为 JSON 字符串（供前端隐藏字段使用）
+            self.initial['targets'] = json.dumps(self.instance.targets, ensure_ascii=False)
+            print(f"DEBUG: initial targets set to {self.initial['targets']}")
+        else:
+            self.initial['targets'] = '[]'
+
+    def clean_targets(self):
+        data = self.cleaned_data.get('targets', '')
+        if not data:
+            return []
+        try:
+            # 尝试解析 JSON
+            targets = json.loads(data)
+            if isinstance(targets, list):
+                return targets
+        except json.JSONDecodeError:
+            pass
+        # 兼容旧数据（按换行分割），可选
+        return [line.strip() for line in data.splitlines() if line.strip()]
 
     def clean_start_time(self):
         return self.cleaned_data.get('start_time')
@@ -223,3 +254,15 @@ QuestionFormSet = forms.inlineformset_factory(
     can_delete=True,
     max_num=20,
 )
+
+class SelectTargetForm(forms.Form):
+    """选择评价目标（第一步）"""
+    target = forms.ChoiceField(
+        widget=forms.RadioSelect,
+        label='请选择被评价人'
+    )
+
+    def __init__(self, *args, targets_list=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if targets_list:
+            self.fields['target'].choices = [(name, name) for name in targets_list]

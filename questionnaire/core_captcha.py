@@ -123,20 +123,27 @@ def warp_image(image):
 
 def create_captcha_image(text):
     """创建更复杂的验证码图片"""
-    width, height = 140, 60  # 稍微加大尺寸
+    width, height = 200, 90  # 稍微加大尺寸
     image = Image.new('RGB', (width, height), color='white')
     draw = ImageDraw.Draw(image)
 
     # 尝试加载不同字体
     fonts = []
-    font_sizes = [28, 32, 30]
+    font_sizes = [40, 44, 48]
 
     # 尝试不同字体
     font_paths = [
-        None,  # 默认字体
-        "arial.ttf",
+        #None,  # 默认字体（最后备用，但很小，仅作兜底）
+        "arial.ttf",  # Windows
+        "arialbd.ttf",
         "times.ttf",
-        "cour.ttf"
+        "cour.ttf",
+        "DejaVuSans.ttf",  # Linux 常见字体名
+        "LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Debian/Ubuntu
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/abattis/cantarell/Cantarell-Regular.ttf",  # Fedora
+        "C:/Windows/Fonts/Arial.ttf"  # Windows 绝对路径（Linux 无效，但无影响）
     ]
 
     for font_path in font_paths:

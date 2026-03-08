@@ -340,6 +340,17 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
                                 <span class="text-muted">不限制</span>
                             {% endif %}
                         </p>
+                    <!-- 评价目标列表 -->
+{% if questionnaire.targets %}
+<div class="mb-3">
+    <p class="mb-1"><strong>评价目标列表：</strong></p>
+    <div class="d-flex flex-wrap gap-2">
+        {% for target in questionnaire.targets %}
+            <span class="badge bg-info text-dark">{{ target }}</span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
                         <p><strong>问卷状态:</strong>
                             <span class="badge {% if questionnaire.status == 'published' %}bg-success{% elif questionnaire.status == 'draft' %}bg-warning{% else %}bg-secondary{% endif %}">
                                 {{ questionnaire.get_status_display }}
@@ -1374,6 +1385,11 @@ function getQuestionTypeDisplay(type) {
 
 // 更新填写按钮状态
 function updateButtonUI(hasQrcode, userSubmittedFromMsg) {
+    console.log('===== updateButtonUI 被调用 =====');
+    console.log('hasQrcode:', hasQrcode);
+    console.log('userSubmittedFromMsg:', userSubmittedFromMsg);
+    console.log('questionnaire.enable_multi_qrcodes:', {{ questionnaire.enable_multi_qrcodes|yesno:"true,false" }});
+    console.log('templateUserHasSubmitted:', templateUserHasSubmitted);
     // ========== 前端实时判断问卷是否截止 ==========
     let isEnded = false;
 
@@ -1434,7 +1450,7 @@ function updateButtonUI(hasQrcode, userSubmittedFromMsg) {
             }
         } else if (currentVersion > userVersion) {
             userSubmitted = false;  // 问卷更新，允许填写
-            updateStatsUI(0);
+            //updateStatsUI(0);
             console.log('版本覆盖: 问卷更新，强制设为 false');
         } else if (currentVersion === userVersion && userVersion > 0) {
             userSubmitted = true;   // 版本相同且有提交记录，禁用
@@ -1487,21 +1503,31 @@ function updateButtonUI(hasQrcode, userSubmittedFromMsg) {
             fillBtn.parentNode.replaceChild(newBtn, fillBtn);
         }
     } else {
-        fillBtn.classList.add('btn-success');
-        fillBtn.removeAttribute('disabled');
-        fillBtn.setAttribute('title', '');
-        fillBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i>填写问卷';
-        if (fillBtn.tagName !== 'A') {
-            const newLink = document.createElement('a');
-            newLink.id = 'fill-questionnaire-btn';
-            newLink.className = fillBtn.className + ' btn-success';
-            newLink.href = "{% url 'survey_form' questionnaire.id %}";
-            newLink.innerHTML = fillBtn.innerHTML;
-            fillBtn.parentNode.replaceChild(newLink, fillBtn);
-        } else {
-            fillBtn.href = "{% url 'survey_form' questionnaire.id %}";
+    fillBtn.classList.add('btn-success');
+    fillBtn.removeAttribute('disabled');
+    fillBtn.setAttribute('title', '');
+    fillBtn.innerHTML = '<i class="fas fa-play-circle me-1"></i>填写问卷';
+
+    // 获取问卷是否有目标
+    const hasTargets = document.getElementById('questionnaire-has-targets')?.value === 'true';
+
+    // 根据是否有目标决定跳转 URL
+    const targetUrl = hasTargets
+        ? "{% url 'select_target' questionnaire.id %}"
+        : "{% url 'survey_form' questionnaire.id %}";
+
+    if (fillBtn.tagName !== 'A') {
+        const newLink = document.createElement('a');
+        newLink.id = 'fill-questionnaire-btn';
+        newLink.className = fillBtn.className + ' btn-success';
+        newLink.href = targetUrl;
+        newLink.innerHTML = fillBtn.innerHTML;
+        fillBtn.parentNode.replaceChild(newLink, fillBtn);
+    } else {
+            fillBtn.href = targetUrl;
         }
     }
+    console.log('最终按钮元素:', document.getElementById('fill-questionnaire-btn').outerHTML);
 }
 
 // 更新统计信息（提交次数等）- 改进版：避免被0覆盖
@@ -1521,12 +1547,14 @@ function updateStatsUI(submitCount) {
 // 在页面加载后调用
 document.addEventListener('DOMContentLoaded', function() {
     if (!window.__data_loaded_from_storage) {
-        fetchLatestData(); // 只有未从存储加载时才执行
+        //fetchLatestData(); // 只有未从存储加载时才执行
     }
 });
 </script>
     <input type="hidden" id="questionnaire-version" value="{{ questionnaire.version }}">
     <input type="hidden" id="user-latest-version" value="{{ latest_response_version|default:0 }}">
+    <!-- 标识问卷是否有目标列表 -->
+    <input type="hidden" id="questionnaire-has-targets" value="{% if questionnaire.targets %}true{% else %}false{% endif %}">
     <p>模板变量 user_has_submitted: {{ user_has_submitted }}</p>
 </body>
 </html>

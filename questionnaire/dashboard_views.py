@@ -129,9 +129,9 @@ def get_derived_statuses(questionnaire, now):
 def questionnaire_list(request):
     """问卷列表"""
     if request.user.is_superuser:
-        questionnaires = Questionnaire.objects.all().order_by('-created_at')
+        questionnaires = Questionnaire.objects.filter(is_template=False).all().order_by('-created_at')
     else:
-        questionnaires = Questionnaire.objects.filter(creator=request.user).order_by('-created_at')
+        questionnaires = Questionnaire.objects.filter(creator=request.user, is_template=False).order_by('-created_at')
 
     status = request.GET.get('status')
     has_inv = request.GET.get('has_invite')

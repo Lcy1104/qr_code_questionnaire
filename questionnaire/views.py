@@ -1,7 +1,8 @@
 from .models import Questionnaire, Response,QuestionnaireQRCode
 from .visualization import get_questionnaire_stats, build_stats
-from .forms import QuestionnaireForm, QuestionForm, QuestionFormSet
+from .forms import QuestionnaireForm, QuestionForm, QuestionFormSet, SelectTargetForm
 from django.utils import timezone
+from django.views.generic import ListView
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -24,6 +25,30 @@ logger = logging.getLogger(__name__)
 THIS_IS_A_TEST_FOR_RELOAD = "如果看到这条消息，说明 Django 重新加载了"
 print(f"===== DJANGO RELOADED: {THIS_IS_A_TEST_FOR_RELOAD} =====")
 
+# 新增：创建方式选择视图
+@login_required
+def create_choice(request):
+    """选择创建问卷的方式：从模板创建 或 手动创建"""
+    return render(request, 'questionnaire/create_choice.html')
+
+# 新增：模板列表视图
+class TemplateListView(ListView):
+    """显示所有预设模板"""
+    model = Questionnaire
+    template_name = 'questionnaire/template_list.html'
+    context_object_name = 'templates'
+
+    def get_queryset(self):
+        return Questionnaire.objects.filter(is_template=True).order_by('title')
+
+# 新增：从模板创建视图
+@login_required
+def create_from_template(request, template_id):
+    """从模板创建问卷：复制模板的问题，跳转到编辑页面"""
+    template = get_object_or_404(Questionnaire, id=template_id, is_template=True)
+    request.session['template_id'] = str(template.id)
+    return redirect('create_questionnaire')
+
 @login_required
 def check_questionnaire_status(request, questionnaire_id):
     """检查问卷状态（供创建者使用）"""
@@ -42,6 +67,22 @@ def check_questionnaire_status(request, questionnaire_id):
 def survey_form(request, questionnaire_id):
     """问卷填写页面 - 方案B兼容"""
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
+
+    print(f"===== DEBUG survey_form =====")
+    print(f"questionnaire_id: {questionnaire_id}")
+    print(f"targets: {questionnaire.targets}")
+    print(f"type of targets: {type(questionnaire.targets)}")
+    import sys
+    sys.stdout.flush()
+
+    if questionnaire.targets:
+        print("目标列表非空，准备重定向到 select_target")
+        return redirect('select_target', questionnaire_id=questionnaire.id)
+    else:
+        print("目标列表为空，继续执行原有流程")
+
+    if questionnaire.targets:
+        return redirect('select_target', questionnaire_id=questionnaire.id)
 
     # 检查问卷状态
     if questionnaire.status != 'published':
@@ -89,6 +130,50 @@ def survey_form(request, questionnaire_id):
         'now': timezone.now(),
     })
 
+@login_required
+def select_target(request, questionnaire_id):
+    """第一步：选择评价目标"""
+    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status__in=['published', 'modified'])
+
+    if not questionnaire.targets:
+        # 如果没有目标，直接进入问题页
+        return redirect('answer_questions', questionnaire_id=questionnaire.id)
+
+    if request.method == 'POST':
+        form = SelectTargetForm(request.POST, targets_list=questionnaire.targets)
+        if form.is_valid():
+            target = form.cleaned_data['target']
+            request.session['selected_target'] = target
+            return redirect('answer_questions', questionnaire_id=questionnaire.id)
+    else:
+        form = SelectTargetForm(targets_list=questionnaire.targets)
+
+    return render(request, 'questionnaire/select_target.html', {
+        'questionnaire': questionnaire,
+        'form': form,
+    })
+
+@login_required
+def answer_questions(request, questionnaire_id):
+    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status__in=['published', 'modified'])
+
+    # 检查是否需要先选择目标（GET 和 POST 都需要检查，但 GET 时不应 pop）
+    if questionnaire.targets and 'selected_target' not in request.session:
+        return redirect('select_target', questionnaire_id=questionnaire.id)
+
+    # GET 请求：显示问题页面（只读取 session，不删除）
+    if request.method == 'GET':
+        target = request.session.get('selected_target') if questionnaire.targets else None
+        questions = questionnaire.questions.all().order_by('order')
+        return render(request, 'questionnaire/answer.html', {
+            'questionnaire': questionnaire,
+            'questions': questions,
+            'target': target,
+        })
+
+    # POST 请求：提交答卷（handle_survey_submission 内部会从 session pop 并保存 target）
+    from .views_survey import handle_survey_submission
+    return handle_survey_submission(request, questionnaire_id=questionnaire.id)
 
 @login_required
 def create_questionnaire(request):
@@ -235,6 +320,20 @@ def create_questionnaire(request):
     else:
         form = QuestionnaireForm()
         question_formset = QuestionFormSet()
+        template_id = request.session.pop('template_id', None)
+        if template_id:
+            try:
+                template = Questionnaire.objects.get(id=template_id, is_template=True)
+                form = QuestionnaireForm(initial={
+                    'title': f'副本：{template.title}',
+                    'description': template.description,
+                    'access_type': template.access_type,
+                })
+                # 预填充问题
+                questions = template.questions.all().order_by('order')
+                question_formset = QuestionFormSet(queryset=questions)
+            except Questionnaire.DoesNotExist:
+                pass
 
     return render(request, 'questionnaire/create.html', {
         'form': form,
@@ -797,6 +896,7 @@ def questionnaire_detail(request, questionnaire_id):
     # 传递截止时间的 ISO 字符串和当前时间的 ISO 字符串（供前端比较）
     end_time_iso = questionnaire.end_time.isoformat() if questionnaire.end_time else None
     now_iso = timezone.now().isoformat()
+
     return render(request, 'questionnaire/detail.html', {
         'questionnaire': questionnaire,
         'responses': responses,

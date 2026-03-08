@@ -59,7 +59,7 @@
           <span id="originalCount" class="d-none" data-val="{{ questionnaires.count }}"></span>
       </p>
     </div>
-    <a href="{% url 'create_questionnaire' %}" class="btn btn-primary">
+    <a href="{% url 'create_choice' %}" class="btn btn-primary">
       <i class="fas fa-plus me-2"></i>创建新问卷
     </a>
   </div>
@@ -294,7 +294,7 @@
       <i class="fas fa-inbox fa-4x text-muted mb-4"></i>
       <h4 class="text-muted">暂无问卷</h4>
       <p class="text-muted mb-4">创建您的第一份问卷来开始收集数据吧！</p>
-      <a href="{% url 'create_questionnaire' %}" class="btn btn-primary btn-lg"><i class="fas fa-plus me-2"></i>创建问卷</a>
+      <a href="{% url 'create_choice' %}" class="btn btn-primary btn-lg"><i class="fas fa-plus me-2"></i>创建问卷</a>
     </div>
   {% endif %}
   {% csrf_token %}

@@ -10,7 +10,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-
+from .forms import SelectTargetForm
 from .models import Questionnaire, Response, Answer, QuestionnaireQRCode
 from .notification_manager import NotificationManager
 
@@ -49,6 +49,9 @@ def survey_landing(request, survey_uuid):
 @never_cache
 def survey_fill(request, survey_uuid):
     questionnaire = get_object_or_404(Questionnaire, id=survey_uuid, status='published')
+
+    if questionnaire.targets:
+        return redirect('select_target', questionnaire_id=questionnaire.id)
 
     # 公共检查（邀请码）
     if questionnaire.access_type == 'invite':
@@ -148,7 +151,8 @@ def handle_survey_submission(request, questionnaire_id):
             user_agent=request.META.get('HTTP_USER_AGENT', '')[:200],
             is_submitted=True,
             questionnaire_version=questionnaire.version,
-            completion_time=completion_time
+            completion_time=completion_time,
+            target_name=request.session.pop('selected_target', '') if questionnaire.targets else ''  # 新增
         )
         logger.debug(f'已保存 Response id={response.id} completion_time 值={response.completion_time}')
         qrcode_obj = None
@@ -433,3 +437,5 @@ def survey_thank_you(request, survey_uuid):
     return render(request, 'questionnaire/already_submitted.html', {
         'questionnaire': questionnaire
     })
+
+

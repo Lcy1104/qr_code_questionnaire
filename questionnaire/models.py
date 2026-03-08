@@ -134,6 +134,12 @@ class Questionnaire(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     published_at = models.DateTimeField(null=True, blank=True)
 
+    targets = EncryptedJSONField(default=list, blank=True, verbose_name='评价目标列表')
+    is_template = models.BooleanField(
+        default=False,
+        verbose_name='是否为预设模板'
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # 保存旧状态用于比较
@@ -456,6 +462,7 @@ class Response(models.Model):
     is_submitted = models.BooleanField(default=True, verbose_name='已提交')
     completion_time = models.IntegerField(null=True, blank=True, verbose_name='完成时间')
     questionnaire_version = models.IntegerField(default=1, verbose_name='问卷版本')
+    target_name = EncryptedCharField(max_length=100, blank=True, null=True, verbose_name='被评价人姓名')
     device_fingerprint = models.CharField(
         max_length=64,
         null=True,

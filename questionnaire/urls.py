@@ -125,4 +125,15 @@ urlpatterns = [
 
     # 检查用户名可用性
     path('profile/check-username/', dashboard_views.check_username_availability, name='check_username'),
+
+    # 新增：创建方式选择
+    path('create/choice/', views.create_choice, name='create_choice'),
+
+    # 新增：模板列表
+    path('templates/', views.TemplateListView.as_view(), name='template_list'),
+    path('templates/<uuid:template_id>/use/', views.create_from_template, name='create_from_template'),
+
+    # 新增：两步填写
+    path('questionnaire/<uuid:questionnaire_id>/select-target/', views.select_target, name='select_target'),
+    path('questionnaire/<uuid:questionnaire_id>/answer/', views.answer_questions, name='answer_questions'),
 ]
