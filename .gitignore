@@ -1,0 +1,14 @@
+# IDE 配置目录
+.idea/
+
+# Python 编译缓存
+__pycache__/
+*.pyc
+
+# 其他可能不需要的（可选）
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
