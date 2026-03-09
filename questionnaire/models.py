@@ -87,6 +87,7 @@ class Questionnaire(models.Model):
     description = EncryptedTextField(blank=True, verbose_name='问卷描述')
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_questionnaires',
                                 verbose_name='创建者')
+    from_template = models.BooleanField(default=False, verbose_name='是否从模板创建')
 
     # 发布设置
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name='状态')

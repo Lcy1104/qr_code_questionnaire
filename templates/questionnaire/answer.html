@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+{% load static %}
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -71,6 +72,10 @@
         <!-- 表单 -->
         <form id="surveyForm">
             {% csrf_token %}
+            {% if is_anonymous %}
+                <input type="hidden" name="anonymous" value="1">
+                <input type="hidden" name="device_fingerprint" id="device_fingerprint" value="">
+            {% endif %}
             {% for q in questions %}
             <div class="question-card" id="question-{{ q.id }}">
                 <div class="question-text">
@@ -147,6 +152,113 @@
                 <a href="{% url 'questionnaire_detail' questionnaire.id %}" class="btn btn-outline-secondary ms-3">取消</a>
             </div>
         </form>
+        <!-- 新增：匿名用户设备指纹生成 -->
+{% if is_anonymous %}
+<script>
+(function() {
+    // 防止重复提交（利用 localStorage）
+    var submittedKey = 'submitted_survey_' + '{{ questionnaire.id }}' + '_v' + '{{ questionnaire.version }}';
+    if (localStorage.getItem(submittedKey) === 'true') {
+        window.location.href = "{% url 'survey_thank_you' questionnaire.id %}";
+        return;
+    }
+
+    // 指纹加载器（多源加载 + 降级方案）
+    function FingerprintLoader(options) {
+        options = options || {};
+        this.urls = options.urls || [
+            'https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js',
+            'https://unpkg.com/@fingerprintjs/fingerprintjs@3/dist/fp.min.js',
+            '{% static "js/fp.min.js" %}'  // 如果有本地备用文件
+        ];
+        this.maxRetries = options.maxRetries || 3;
+        this.timeout = options.timeout || 5000;
+        this.attempt = 0;
+    }
+
+    FingerprintLoader.prototype.loadScript = function(src) {
+        var self = this;
+        return new Promise(function(resolve, reject) {
+            var script = document.createElement('script');
+            script.src = src;
+            script.async = true;
+            script.onload = function() { resolve(window.FingerprintJS); };
+            script.onerror = function() { reject(new Error('Failed to load ' + src)); };
+            setTimeout(function() { reject(new Error('Timeout')); }, self.timeout);
+            document.head.appendChild(script);
+        });
+    };
+
+    FingerprintLoader.prototype.retryLoad = async function() {
+        while (this.attempt < this.maxRetries) {
+            for (var i = 0; i < this.urls.length; i++) {
+                var url = this.urls[i];
+                try {
+                    console.log('[Fingerprint] 尝试加载: ' + url + ' (尝试 ' + (this.attempt + 1) + ')');
+                    var FingerprintJS = await this.loadScript(url);
+                    return FingerprintJS;
+                } catch (err) {
+                    // 继续下一个源
+                }
+            }
+            this.attempt++;
+            if (this.attempt < this.maxRetries) {
+                await new Promise(function(resolve) { setTimeout(resolve, Math.pow(2, this.attempt) * 1000); });
+            }
+        }
+        throw new Error('All sources failed after max retries');
+    };
+
+    FingerprintLoader.prototype.generateFallbackId = function() {
+        return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    };
+
+    FingerprintLoader.prototype.getFingerprint = async function() {
+        var cachedId = localStorage.getItem('anonymous_visitor_id');
+        if (cachedId) {
+            console.log('[Fingerprint] 使用缓存的 anonymous_visitor_id:', cachedId);
+            return cachedId;
+        }
+
+        var FingerprintJS;
+        try {
+            FingerprintJS = await this.retryLoad();
+        } catch (err) {
+            console.warn('[Fingerprint] 加载失败，启用降级方案', err);
+            var fallbackId = this.generateFallbackId();
+            localStorage.setItem('anonymous_visitor_id', fallbackId);
+            return fallbackId;
+        }
+
+        try {
+            var fp = await FingerprintJS.load();
+            var result = await fp.get();
+            var visitorId = result.visitorId;
+            localStorage.setItem('anonymous_visitor_id', visitorId);
+            return visitorId;
+        } catch (err) {
+            console.warn('[Fingerprint] 初始化失败，启用降级方案', err);
+            var fallbackId = this.generateFallbackId();
+            localStorage.setItem('anonymous_visitor_id', fallbackId);
+            return fallbackId;
+        }
+    };
+
+    // 执行
+    (async function() {
+        var loader = new FingerprintLoader();
+        var visitorId = await loader.getFingerprint();
+        var input = document.getElementById('device_fingerprint');
+        if (input) {
+            input.value = visitorId;
+            console.log('[Fingerprint] 最终设备指纹:', visitorId);
+        } else {
+            console.error('[Fingerprint] 未找到 device_fingerprint 输入框');
+        }
+    })();
+})();
+</script>
+{% endif %}
     </div>
 
     <!-- jQuery 和 Bootstrap JS -->

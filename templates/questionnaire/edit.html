@@ -139,7 +139,10 @@
                                     </div>
 
                                 </div>
-
+                            {% if from_template == '1' %}
+                            <!-- 评价目标列表 -->
+                                <!-- 评价目标列表（动态添加/删除） -->
+                                    <input type="hidden" name="from_template" value="1">
                             <!-- 评价目标列表（移出行外） -->
 <!-- 评价目标列表（动态添加/删除） -->
 <div class="mb-3" id="targets-container">
@@ -155,6 +158,7 @@
     <!-- 隐藏字段用于存储最终的目标列表（JSON格式） -->
     <input type="hidden" name="targets" id="id_targets" value="{{ form.targets.value|default:'[]' }}">
 </div>
+{% endif %}
 
                                 <div class="mb-3">
                                     <label for="{{ form.description.id_for_label }}" class="form-label">

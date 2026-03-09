@@ -193,8 +193,10 @@
                                         公开：任何人都可以填写；私有：需要登录；邀请码：需要输入邀请码
                                     </div>
                                 </div>
-                                <!-- 评价目标列表 -->
+                                {% if from_template == '1' %}
+                            <!-- 评价目标列表 -->
                                 <!-- 评价目标列表（动态添加/删除） -->
+                                    <input type="hidden" name="from_template" value="1">
 <div class="mb-3" id="targets-container">
     <label class="form-label">{{ form.targets.label }}</label>
     <div id="targets-list">
@@ -208,6 +210,8 @@
     <!-- 隐藏字段用于存储最终的目标列表（JSON格式） -->
     <input type="hidden" name="targets" id="id_targets" value="{{ form.targets.value|default:'[]' }}">
 </div>
+<input type="hidden" name="from_template" value="1">
+{% endif %}
                             </div>
 
                             <!-- 问题列表 -->
@@ -415,6 +419,9 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        console.log('from_template from URL:', {{ from_template|yesno:"true,false" }});
+        console.log('from_template from template:', {{ from_template|yesno:"true,false" }});
+        console.log('session.is_from_template:', {{ request.session.is_from_template|yesno:"true,false" }});
     // 数字转字母（支持无限选项）
     function numberToLetter(num) {
         if (num < 26) {
@@ -1058,5 +1065,12 @@ if (limitCheckbox) {
     toggleMultiQrcodeField(); // 初始化
 }
     </script>
+<script>
+    console.log('from_template from session:', {{ request.session.from_template|yesno:"true,false" }});
+</script>
+<script>
+    console.log('from_template_raw:', '{{ from_template_raw|default:"" }}');
+    console.log('from_template_raw == 1:', {% if from_template_raw == '1' %}true{% else %}false{% endif %});
+</script>
 </body>
 </html>

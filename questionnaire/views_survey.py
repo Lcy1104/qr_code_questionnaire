@@ -34,15 +34,18 @@ def survey_landing(request, survey_uuid):
         'user_is_authenticated': request.user.is_authenticated,
     }
 
-    context['anonymous_url'] = reverse('survey_form', args=[survey_uuid]) + '?anonymous=1'
+    start_url_name = 'select_target' if questionnaire.targets else 'survey_form'
+
+    if questionnaire.targets:
+        context['anonymous_url'] = reverse('select_target', args=[survey_uuid]) + '?anonymous=1'
+    else:
+        context['anonymous_url'] = reverse('survey_form', args=[survey_uuid]) + '?anonymous=1'
 
     if request.user.is_authenticated:
-        # 已登录用户：显示“开始填写”按钮
-        context['start_url'] = reverse('survey_form', args=[survey_uuid])
+        context['start_url'] = reverse(start_url_name, args=[survey_uuid])
     else:
-        # 未登录用户：显示登录、注册、匿名填写按钮
-        context['login_url'] = reverse('login') + f'?next={reverse("survey_form", args=[survey_uuid])}'
-        context['register_url'] = reverse('register') + f'?next={reverse("survey_form", args=[survey_uuid])}'
+        context['login_url'] = reverse('login') + f'?next={reverse(start_url_name, args=[survey_uuid])}'
+        context['register_url'] = reverse('register') + f'?next={reverse(start_url_name, args=[survey_uuid])}'
 
     return render(request, 'questionnaire/landing.html', context)
 
@@ -55,7 +58,7 @@ def survey_fill(request, survey_uuid):
 
     # 公共检查（邀请码）
     if questionnaire.access_type == 'invite':
-        if 'valid_invite_code' not in request.session or ...:
+        if 'valid_invite_code' not in request.session or request.session.get('valid_invite_code') != questionnaire.invite_code:
             return redirect('survey_landing', survey_uuid=survey_uuid)
 
     # 判断是否为匿名模式（通过 URL 参数 ?anonymous=1 触发）
@@ -260,7 +263,12 @@ def handle_survey_submission(request, questionnaire_id):
             )
         except Exception as e:
             logger.error(f"发送新答卷通知失败: {e}")
-        redirect_url = reverse('questionnaire_detail', args=[questionnaire.id]) + f'?_={int(time.time())}'
+        if is_anonymous_mode:
+            # 匿名用户跳转到感谢页
+            redirect_url = reverse('survey_thank_you', args=[questionnaire.id])
+        else:
+            # 登录用户跳转到详情页（带时间戳避免缓存）
+            redirect_url = reverse('questionnaire_detail', args=[questionnaire.id]) + f'?_={int(time.time())}'
         return JsonResponse({'ok': True, 'redirect': redirect_url})
 
     # ========== 匿名用户分支：新增，完全独立 ==========

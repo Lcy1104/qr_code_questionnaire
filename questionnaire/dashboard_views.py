@@ -227,6 +227,10 @@ def create_questionnaire(request):
             questionnaire = form.save(commit=False)
             questionnaire.creator = request.user
 
+            # 从 POST 数据中读取 from_template 隐藏字段（值为 '1' 或 None）
+            if request.POST.get('from_template') == '1':
+                questionnaire.from_template = True
+
             # 获取保存动作
             save_action = request.POST.get('save_action', 'save_draft')
 
@@ -301,15 +305,26 @@ def create_questionnaire(request):
                 messages.success(request, '问卷已保存为草稿！')
                 return redirect('questionnaire_list')
         else:
+            from_template = request.POST.get('from_template')
             # 表单验证失败
             messages.error(request, '表单验证失败，请检查填写内容')
+            return render(request, 'questionnaire/create.html', {
+                'form': form,
+                'from_template': from_template,  # 传递原始字符串，可能为 '1' 或 None
+                'is_admin': request.user.is_admin
+            })
     else:
         form = QuestionnaireForm()
-
-    return render(request, 'questionnaire/create.html', {
+        from_template = request.GET.get('from_template')
+        return render(request, 'questionnaire/create.html', {
+            'form': form,
+            'from_template': from_template,  # 直接传递原始值
+            'is_admin': request.user.is_admin
+        })
+    '''return render(request, 'questionnaire/create.html', {
         'form': form,
         'is_admin': request.user.is_admin
-    })
+    })'''
 
 @login_required
 def edit_questionnaire(request, questionnaire_id):

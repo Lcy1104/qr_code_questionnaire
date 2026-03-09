@@ -595,6 +595,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
+    {% if user.is_authenticated and not is_anonymous %}
     // 设置WebSocket通知
     if (typeof WebSocket !== 'undefined') {
         setupWebSocketNotifications();
@@ -614,7 +615,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             badge.style.display = 'none';
                         }
                     }
-                    
+
                     const menuBadge = document.querySelector('.dropdown-item .badge.bg-danger');
                     if (menuBadge) {
                         if (data.unread_count > 0) {
@@ -630,6 +631,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         }, 30000); // 30秒轮询一次
     }
+    {% endif %}
     
     // 监听通知下拉菜单点击
     const notificationDropdown = document.getElementById('notificationDropdown');

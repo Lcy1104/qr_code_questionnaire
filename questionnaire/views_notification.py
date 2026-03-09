@@ -272,7 +272,7 @@ def acknowledge_update(request, questionnaire_id):
         return JsonResponse({'error': '只支持POST请求'}, status=400)
 
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
-
+    '''
     # 获取用户对这个问卷的最新回答
     latest_response = Response.objects.filter(
         questionnaire=questionnaire,
@@ -285,7 +285,7 @@ def acknowledge_update(request, questionnaire_id):
         # 注意：这里不修改数据库中的实际版本，只是记录用户已确认
         latest_response.questionnaire_version = questionnaire.version
         latest_response.save()
-
+    '''
     # 将关于这个问卷的所有未读通知标记为已读
     notifications = Notification.objects.filter(
         user=request.user,

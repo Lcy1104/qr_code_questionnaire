@@ -3,7 +3,7 @@ from .visualization import get_questionnaire_stats, build_stats
 from .forms import QuestionnaireForm, QuestionForm, QuestionFormSet, SelectTargetForm
 from django.utils import timezone
 from django.views.generic import ListView
-from django.shortcuts import render, redirect, get_object_or_404
+from django.shortcuts import render, redirect, get_object_or_404, reverse
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django import forms
@@ -44,10 +44,10 @@ class TemplateListView(ListView):
 # 新增：从模板创建视图
 @login_required
 def create_from_template(request, template_id):
-    """从模板创建问卷：复制模板的问题，跳转到编辑页面"""
     template = get_object_or_404(Questionnaire, id=template_id, is_template=True)
-    request.session['template_id'] = str(template.id)
-    return redirect('create_questionnaire')
+    #request.session['template_id'] = str(template.id)   # 仍用于预填充问题
+    # 改为 URL 参数传递标记
+    return redirect(f"{reverse('create_questionnaire')}?from_template=1")
 
 @login_required
 def check_questionnaire_status(request, questionnaire_id):
@@ -63,9 +63,12 @@ def check_questionnaire_status(request, questionnaire_id):
         'can_edit': True,
     })
 
-@login_required
 def survey_form(request, questionnaire_id):
     """问卷填写页面 - 方案B兼容"""
+    is_anonymous_mode = request.GET.get('anonymous') == '1'
+    if not request.user.is_authenticated and not is_anonymous_mode:
+        return redirect(f"{reverse('login')}?next={request.path}")
+
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
 
     print(f"===== DEBUG survey_form =====")
@@ -130,36 +133,59 @@ def survey_form(request, questionnaire_id):
         'now': timezone.now(),
     })
 
-@login_required
 def select_target(request, questionnaire_id):
     """第一步：选择评价目标"""
+    is_anonymous = request.GET.get('anonymous') == '1' or request.POST.get('anonymous') == '1'
+    if not request.user.is_authenticated and not is_anonymous:
+        return redirect(f"{reverse('login')}?next={request.path}")
+
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status__in=['published', 'modified'])
 
+    is_anonymous = request.GET.get('anonymous') == '1' or request.POST.get('anonymous') == '1'
+
+    if questionnaire.access_type == 'invite':
+        from .views_invite_first import check_invite_session
+        is_valid, error_msg = check_invite_session(request, questionnaire.id)
+        if not is_valid:
+            messages.warning(request, error_msg or '请先验证邀请码')
+            return redirect('survey_access', questionnaire_id=questionnaire.id)
+
     if not questionnaire.targets:
-        # 如果没有目标，直接进入问题页
-        return redirect('answer_questions', questionnaire_id=questionnaire.id)
+        # 无目标时，根据匿名参数决定是否传递
+        if request.GET.get('anonymous') == '1':
+            return redirect(reverse('answer_questions', args=[questionnaire.id]) + '?anonymous=1')
+        else:
+            return redirect('answer_questions', questionnaire_id=questionnaire.id)
 
     if request.method == 'POST':
         form = SelectTargetForm(request.POST, targets_list=questionnaire.targets)
         if form.is_valid():
             target = form.cleaned_data['target']
             request.session['selected_target'] = target
-            return redirect('answer_questions', questionnaire_id=questionnaire.id)
+            if is_anonymous:
+                return redirect(f"{reverse('answer_questions', args=[questionnaire.id])}?anonymous=1")
+            else:
+                return redirect('answer_questions', questionnaire_id=questionnaire.id)
     else:
         form = SelectTargetForm(targets_list=questionnaire.targets)
 
     return render(request, 'questionnaire/select_target.html', {
         'questionnaire': questionnaire,
         'form': form,
+        'is_anonymous': is_anonymous,  # 传递给模板（可选，用于隐藏登录提示）
     })
 
-@login_required
 def answer_questions(request, questionnaire_id):
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status__in=['published', 'modified'])
 
-    # 检查是否需要先选择目标（GET 和 POST 都需要检查，但 GET 时不应 pop）
+    is_anonymous = request.GET.get('anonymous') == '1' or request.POST.get('anonymous') == '1'
+
+    # 检查是否需要先选择目标（有目标且无 session 目标时重定向）
     if questionnaire.targets and 'selected_target' not in request.session:
-        return redirect('select_target', questionnaire_id=questionnaire.id)
+        if is_anonymous:
+            return redirect(f"{reverse('select_target', args=[questionnaire.id])}?anonymous=1")
+        else:
+            return redirect('select_target', questionnaire_id=questionnaire.id)
 
     # GET 请求：显示问题页面（只读取 session，不删除）
     if request.method == 'GET':
@@ -169,30 +195,33 @@ def answer_questions(request, questionnaire_id):
             'questionnaire': questionnaire,
             'questions': questions,
             'target': target,
+            'is_anonymous': is_anonymous,
         })
 
     # POST 请求：提交答卷（handle_survey_submission 内部会从 session pop 并保存 target）
     from .views_survey import handle_survey_submission
+    if is_anonymous:
+        # 由于 request.POST 不可变，可以复制后添加
+        request.POST = request.POST.copy()
+        request.POST['anonymous'] = '1'
     return handle_survey_submission(request, questionnaire_id=questionnaire.id)
 
 @login_required
 def create_questionnaire(request):
-    """创建问卷 - 支持不同保存操作"""
     if request.method == 'POST':
         logger = logging.getLogger('questionnaire')
         logger.info(f"[EDIT POST] 接收到的POST数据: {dict(request.POST)}")
         logger.info(f"[EDIT POST] TOTAL_FORMS: {request.POST.get('questions-TOTAL_FORMS')}")
         logger.info(f"[EDIT POST] INITIAL_FORMS: {request.POST.get('questions-INITIAL_FORMS')}")
 
-        # 打印所有questions相关的字段
         for key in sorted(request.POST.keys()):
             if 'questions' in key:
                 logger.info(f"[EDIT POST] {key} = {request.POST.get(key)!r}")
+
         form = QuestionnaireForm(request.POST)
         question_formset = QuestionFormSet(request.POST)
 
         logger.info(f"[EDIT POST] 提交的数据: {request.POST.dict()}")
-        # 特别检查 id 字段
         for key, value in request.POST.items():
             if '-id' in key:
                 logger.info(f"[EDIT POST] ID字段: {key} = {value!r}")
@@ -206,18 +235,18 @@ def create_questionnaire(request):
             questionnaire = form.save(commit=False)
             questionnaire.creator = request.user
 
-            # 根据不同的按钮确定保存方式（使用 save_action 字段）
+            # 从 POST 数据中读取隐藏字段 from_template（值为 '1' 或 None）
+            if request.POST.get('from_template') == '1':
+                questionnaire.from_template = True
+
             save_action = request.POST.get('save_action', 'save_draft')
 
+            # ---------- 以下您的所有保存逻辑，完全保留 ----------
             if save_action == 'save_and_publish':
-                # 发布问卷
                 questionnaire.status = 'published'
                 questionnaire.published_at = timezone.now()
-
-                # 保存问卷
                 questionnaire.save()
 
-                # 保存问题
                 questions = question_formset.save(commit=False)
                 for i, question in enumerate(questions):
                     question.questionnaire = questionnaire
@@ -227,82 +256,53 @@ def create_questionnaire(request):
                     logger.info('[CREATE] 第%d题 写入 max_length = %s', i + 1, question.max_length)
                     question.save(update_fields=['max_length'])
 
-                # 处理删除的问题
                 for deleted_form in question_formset.deleted_forms:
                     if deleted_form.instance.pk:
                         deleted_form.instance.delete()
 
-                # 根据访问权限生成相应内容
                 from .views_qrcode import get_server_base_url
                 base_url = get_server_base_url(request)
-
-                # 生成二维码（所有类型的问卷都需要）
                 import qrcode
                 from io import BytesIO
                 from django.core.files.base import ContentFile
 
-                # 构建访问URL
                 if questionnaire.access_type == 'invite':
-                    # 生成邀请码
                     import uuid
                     invite_code = str(uuid.uuid4())[:8].upper()
                     questionnaire.invite_code = invite_code
                     invite_url = f"{base_url}/invite/{invite_code}/"
                     qr_data = invite_url
                 else:
-                    # 公开或私有问卷
                     survey_url = f"{base_url}/survey/{questionnaire.id}/"
                     qr_data = survey_url
 
-                # 生成二维码图片
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=qrcode.constants.ERROR_CORRECT_L,
-                    box_size=10,
-                    border=4,
-                )
+                qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
                 qr.add_data(qr_data)
                 qr.make(fit=True)
-
                 img = qr.make_image(fill_color="black", back_color="white")
                 buffer = BytesIO()
                 img.save(buffer, format="PNG")
-
-                # 保存二维码到问卷模型
-                questionnaire.qr_code.save(
-                    f'qrcode_{questionnaire.id}.png',
-                    ContentFile(buffer.getvalue())
-                )
+                questionnaire.qr_code.save(f'qrcode_{questionnaire.id}.png', ContentFile(buffer.getvalue()))
                 questionnaire.save()
 
-                # 根据访问权限显示不同的成功消息
                 if questionnaire.access_type == 'invite':
                     messages.success(request, f'问卷已发布！二维码和邀请码已生成。邀请码：{invite_code}')
                 else:
                     messages.success(request, '问卷已发布！二维码已生成。')
 
-                # 发布后重定向到问卷管理页面
                 return redirect('questionnaire_list')
 
             elif save_action == 'save_draft':
-                # 保存草稿
                 questionnaire.status = 'draft'
                 questionnaire.save()
-
-                # 保存问题
                 questions = question_formset.save(commit=False)
                 for question in questions:
                     question.questionnaire = questionnaire
                     question.save()
-
-                # 处理删除的问题
                 for deleted_form in question_formset.deleted_forms:
                     if deleted_form.instance.pk:
                         deleted_form.instance.delete()
-
                 messages.success(request, '问卷已保存为草稿！')
-
-                # 草稿保存后重定向到问卷管理页面
                 return redirect('questionnaire_list')
 
         else:
@@ -312,14 +312,27 @@ def create_questionnaire(request):
             for field, errors in form.errors.items():
                 for error in errors:
                     messages.error(request, f'{field}: {error}')
-            for form in question_formset:
-                for field, errors in form.errors.items():
+            for f in question_formset:
+                for field, errors in f.errors.items():
                     for error in errors:
-                        messages.error(request, f'问题 {form.prefix}: {field}: {error}')
+                        messages.error(request, f'问题 {f.prefix}: {field}: {error}')
 
-    else:
+            # 从 POST 中获取 from_template 的值（隐藏字段）
+            from_template_raw = request.POST.get('from_template')
+            return render(request, 'questionnaire/create.html', {
+                'form': form,
+                'question_formset': question_formset,
+                'from_template_raw': from_template_raw,   # 统一为 from_template_raw
+            })
+
+    else:  # GET 请求
         form = QuestionnaireForm()
         question_formset = QuestionFormSet()
+        # 从 URL 获取 from_template 参数，保持原始字符串（可能是 '1' 或 None）
+        from_template_raw = request.GET.get('from_template')
+        import sys
+        print(f"===== DEBUG: request.GET = {request.GET} =====", file=sys.stderr)
+        print(f"===== DEBUG: from_template_raw = {from_template_raw} =====", file=sys.stderr)
         template_id = request.session.pop('template_id', None)
         if template_id:
             try:
@@ -329,17 +342,15 @@ def create_questionnaire(request):
                     'description': template.description,
                     'access_type': template.access_type,
                 })
-                # 预填充问题
                 questions = template.questions.all().order_by('order')
                 question_formset = QuestionFormSet(queryset=questions)
             except Questionnaire.DoesNotExist:
                 pass
-
-    return render(request, 'questionnaire/create.html', {
-        'form': form,
-        'question_formset': question_formset,
-    })
-
+        return render(request, 'questionnaire/create.html', {
+            'form': form,
+            'question_formset': question_formset,
+            'from_template_raw': from_template_raw,  # 统一为 from_template_raw
+        })
 
 @login_required
 def edit_questionnaire(request, questionnaire_id):
@@ -480,6 +491,7 @@ def edit_questionnaire(request, questionnaire_id):
 
             # 保存问卷基本信息
             questionnaire = form.save(commit=False)
+
             save_action = request.POST.get('save_action', 'save_draft')
 
             # 关键：只有有修改时才更新版本号
@@ -498,6 +510,18 @@ def edit_questionnaire(request, questionnaire_id):
                 questionnaire.status = 'draft'
                 logger.info(f"[EDIT] 保存草稿，状态: {questionnaire.status}")
 
+            if questionnaire.access_type != 'invite':
+                questionnaire.invite_code = None
+
+            # ========== 生成邀请码（仅邀请且没有时） ==========
+            if questionnaire.access_type == 'invite' and not questionnaire.invite_code:
+                import secrets
+                import string
+                alphabet = string.ascii_uppercase + string.digits
+                questionnaire.invite_code = ''.join(secrets.choice(alphabet) for i in range(8))
+                logger.info(f"[EDIT] 生成新邀请码: {questionnaire.invite_code}")
+
+            # 非邀请时清空邀请码
             if questionnaire.access_type != 'invite':
                 questionnaire.invite_code = None
 
@@ -715,6 +739,7 @@ def edit_questionnaire(request, questionnaire_id):
         'questionnaire': questionnaire,
         'form': form,
         'question_formset': question_formset,
+        'from_template': '1' if questionnaire.from_template else '',
     })
 
 def create_question_version(question):
@@ -817,10 +842,14 @@ def survey_access(request, questionnaire_id=None, invite_code=None):
 
         # 如果有有效的邀请码验证（无论是通过session还是url参数）
         if has_valid_invite:
+            is_anonymous_mode = request.GET.get('anonymous') == '1'
             # 检查用户是否已登录
             if request.user.is_authenticated:
                 # 已登录，直接跳转到填写页面
                 return redirect('survey_form', questionnaire_id=questionnaire.id)
+            elif is_anonymous_mode:
+                # 匿名模式：直接去表单，保留匿名参数
+                return redirect(reverse('survey_form', args=[questionnaire.id]) + '?anonymous=1')
             else:
                 # 未登录，保存信息并跳转到登录页面
                 request.session['next'] = f'/survey/{questionnaire.id}/form/'
@@ -1363,6 +1392,7 @@ def acknowledge_update(request, questionnaire_id):
 
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
 
+    '''
     # 获取用户对这个问卷的最新回答
     latest_response = Response.objects.filter(
         questionnaire=questionnaire,
@@ -1375,6 +1405,7 @@ def acknowledge_update(request, questionnaire_id):
         # 注意：这里不修改数据库中的实际版本，只是记录用户已确认
         latest_response.questionnaire_version = questionnaire.version
         latest_response.save()
+    '''
 
     # 将关于这个问卷的所有未读通知标记为已读
     notifications = Notification.objects.filter(
