@@ -121,6 +121,11 @@ class Questionnaire(models.Model):
         verbose_name='二维码标识'
     )
 
+    is_multi_target = models.BooleanField(
+        default=False,
+        verbose_name='是否启用多目标评价',
+        help_text='启用后，用户需对所有目标依次评价，每个目标独立提交答卷'
+    )
     # 时间
     start_time = models.DateTimeField(null=True, blank=True, verbose_name='开始时间')
     end_time = models.DateTimeField(null=True, blank=True, verbose_name='结束时间')
@@ -482,7 +487,7 @@ class Response(models.Model):
 
     class Meta:
         ordering = ['-submitted_at']
-        unique_together = ['questionnaire', 'user', 'questionnaire_version']
+        unique_together = ['questionnaire', 'user', 'questionnaire_version', 'target_name']
 
     def __str__(self):
         return f"{self.user.username if self.user else '匿名'} - {self.questionnaire.title}"
@@ -744,6 +749,20 @@ class QuestionnaireQRCode(models.Model):
     )
     used_at = models.DateTimeField(null=True, blank=True, verbose_name='使用时间')
     created_at = models.DateTimeField(auto_now_add=True)
+    # 新增绑定字段
+    is_bound = models.BooleanField(default=False, verbose_name='是否已绑定用户')
+    bound_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name='bound_qrcodes',
+        verbose_name='绑定的用户'
+    )
+    bound_fingerprint = models.CharField(
+        max_length=64,
+        null=True, blank=True,
+        verbose_name='绑定的设备指纹'
+    )
 
     class Meta:
         ordering = ['created_at']

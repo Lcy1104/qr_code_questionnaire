@@ -229,7 +229,18 @@ def create_questionnaire(request):
 
             # 从 POST 数据中读取 from_template 隐藏字段（值为 '1' 或 None）
             if request.POST.get('from_template') == '1':
-                questionnaire.from_template = True
+                template_id = request.POST.get('template_id')
+                logger.debug(f"===== from_template=1, template_id received: {template_id} =====")
+
+                if template_id:
+                    try:
+                        template = Questionnaire.objects.get(id=template_id, is_template=True)
+                        logger.debug(f"===== template found, is_multi_target = {template.is_multi_target} =====")
+                        questionnaire.is_multi_target = template.is_multi_target
+                        #questionnaire.targets = template.targets
+                        logger.debug(f"===== after assignment, is_multi_target = {questionnaire.is_multi_target} =====")
+                    except Questionnaire.DoesNotExist:
+                        logger.debug(f"===== template with id {template_id} not found =====")
 
             # 获取保存动作
             save_action = request.POST.get('save_action', 'save_draft')
@@ -248,6 +259,7 @@ def create_questionnaire(request):
 
                 # 保存问卷
                 questionnaire.save()
+                logger.debug(f"===== after save, questionnaire.is_multi_target = {questionnaire.is_multi_target} =====")
 
                 # 保存问题
                 question_count = save_questions_from_post(request, questionnaire)
@@ -305,20 +317,42 @@ def create_questionnaire(request):
                 messages.success(request, '问卷已保存为草稿！')
                 return redirect('questionnaire_list')
         else:
-            from_template = request.POST.get('from_template')
-            # 表单验证失败
-            messages.error(request, '表单验证失败，请检查填写内容')
-            return render(request, 'questionnaire/create.html', {
-                'form': form,
-                'from_template': from_template,  # 传递原始字符串，可能为 '1' 或 None
-                'is_admin': request.user.is_admin
-            })
+                from_template = request.GET.get('from_template')
+                template_id = request.GET.get('template_id')
+                initial = {}
+                question_formset = QuestionFormSet()  # 默认空表单集
+
+                if template_id:
+                    try:
+                        template = Questionnaire.objects.get(id=template_id, is_template=True)
+                        initial = {
+                            'title': f'副本：{template.title}',
+                            'description': template.description,
+                            'access_type': template.access_type,
+                            'targets': template.targets,  # 预填目标列表
+                        }
+                        # 预填问题
+                        questions = template.questions.all().order_by('order')
+                        question_formset = QuestionFormSet(queryset=questions)
+                    except Questionnaire.DoesNotExist:
+                        pass
+
+                form = QuestionnaireForm(initial=initial)
+                return render(request, 'questionnaire/create.html', {
+                    'form': form,
+                    'question_formset': question_formset,  # 必须传递，否则页面无问题
+                    'from_template': from_template,
+                    'template_id': template_id,
+                    'is_admin': request.user.is_admin,
+                })
     else:
         form = QuestionnaireForm()
         from_template = request.GET.get('from_template')
+        template_id = request.GET.get('template_id')  # 新增：从 URL 获取模板ID
         return render(request, 'questionnaire/create.html', {
             'form': form,
             'from_template': from_template,  # 直接传递原始值
+            'template_id': template_id,
             'is_admin': request.user.is_admin
         })
     '''return render(request, 'questionnaire/create.html', {

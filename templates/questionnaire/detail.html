@@ -183,10 +183,15 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
             <i class="fas fa-play-circle me-1"></i>填写问卷
         </button>
     {% elif has_available_qrcode %}
-        <!-- 未提交且有可用二维码：可点击 -->
-        <a href="{% url 'survey_form' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
-            <i class="fas fa-play-circle me-1"></i>填写问卷
-        </a>
+        {% if questionnaire.is_multi_target %}
+            <a href="{% url 'multi_target_dashboard' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
+                <i class="fas fa-play-circle me-1"></i>填写问卷
+            </a>
+        {% else %}
+            <a href="{% url 'survey_form' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
+                <i class="fas fa-play-circle me-1"></i>填写问卷
+            </a>
+        {% endif %}
     {% else %}
         <!-- 未提交但无可用二维码：禁用按钮，提示无二维码 -->
         <button class="btn btn-secondary" disabled
@@ -195,10 +200,15 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
         </button>
     {% endif %}
 {% else %}
-    <!-- 未启用多二维码：直接可点击 -->
-    <a href="{% url 'survey_form' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
-        <i class="fas fa-play-circle me-1"></i>填写问卷
-    </a>
+    {% if questionnaire.is_multi_target %}
+        <a href="{% url 'multi_target_dashboard' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
+            <i class="fas fa-play-circle me-1"></i>填写问卷
+        </a>
+    {% else %}
+        <a href="{% url 'survey_form' questionnaire.id %}" class="btn btn-success" id="fill-questionnaire-btn">
+            <i class="fas fa-play-circle me-1"></i>填写问卷
+        </a>
+    {% endif %}
 {% endif %}
                             
                             <!-- 通知中心按钮 -->
@@ -1511,10 +1521,18 @@ function updateButtonUI(hasQrcode, userSubmittedFromMsg) {
     // 获取问卷是否有目标
     const hasTargets = document.getElementById('questionnaire-has-targets')?.value === 'true';
 
-    // 根据是否有目标决定跳转 URL
-    const targetUrl = hasTargets
-        ? "{% url 'select_target' questionnaire.id %}"
-        : "{% url 'survey_form' questionnaire.id %}";
+// 获取问卷是否为多目标（直接使用模板变量）
+const isMultiTarget = {{ questionnaire.is_multi_target|yesno:"true,false" }};
+
+// 根据是否多目标及是否有目标决定跳转 URL
+let targetUrl;
+if (isMultiTarget) {
+    targetUrl = "{% url 'multi_target_dashboard' questionnaire.id %}";
+} else if (hasTargets) {
+    targetUrl = "{% url 'select_target' questionnaire.id %}";
+} else {
+    targetUrl = "{% url 'survey_form' questionnaire.id %}";
+}
 
     if (fillBtn.tagName !== 'A') {
         const newLink = document.createElement('a');

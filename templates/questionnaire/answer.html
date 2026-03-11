@@ -72,6 +72,7 @@
         <!-- 表单 -->
         <form id="surveyForm">
             {% csrf_token %}
+            <input type="hidden" name="target_name" value="{{ target }}">
             {% if is_anonymous %}
                 <input type="hidden" name="anonymous" value="1">
                 <input type="hidden" name="device_fingerprint" id="device_fingerprint" value="">

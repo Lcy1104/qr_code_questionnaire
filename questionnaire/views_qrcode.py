@@ -8,9 +8,7 @@ import base64
 from django.core.files.base import ContentFile
 from django.conf import settings
 import socket
-
 from django.utils import timezone
-
 from .models import Questionnaire
 import secrets
 from django.http import JsonResponse, HttpResponse
@@ -18,6 +16,9 @@ from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
 from .models import QuestionnaireQRCode
 from django.urls import reverse
+from django.db import transaction
+from django.contrib import messages
+import uuid
 
 def get_server_base_url(request: HttpRequest) -> str:
     """获取服务器基础URL"""
@@ -194,17 +195,47 @@ def mark_qrcode_shared(request, qr_code_id):
         return JsonResponse({'success': False, 'error': '二维码不存在'}, status=404)
 
 def qrcode_access(request, qr_code_id):
-    """通过一次性二维码访问问卷"""
-    qrcode = get_object_or_404(QuestionnaireQRCode, qr_code_id=qr_code_id)
-    if qrcode.is_used:
-        return render(request, 'error.html', {'message': '该二维码已被使用'})
-    # 标记为已分享（如果尚未），确保普通提交不会抢走
-    if not qrcode.is_shared:
-        qrcode.is_shared = True
-        qrcode.save(update_fields=['is_shared'])
-    # 将二维码ID存入 session，供提交时使用
-    request.session['active_qrcode_id'] = qr_code_id
-    return redirect('survey_landing', survey_uuid=qrcode.questionnaire.id)
+    with transaction.atomic():
+        qrcode = get_object_or_404(QuestionnaireQRCode, qr_code_id=qr_code_id)
+        questionnaire = qrcode.questionnaire
+
+        # 如果二维码已完成全部评价，拒绝访问
+        if qrcode.is_used:
+            return render(request, 'error.html', {'message': '该二维码已完成全部评价'})
+
+        # 获取当前用户标识
+        if request.user.is_authenticated:
+            current_user = request.user
+            current_fingerprint = None
+        else:
+            current_user = None
+            current_fingerprint = request.session.get('anon_fingerprint')
+            if not current_fingerprint:
+                current_fingerprint = str(uuid.uuid4())
+                request.session['anon_fingerprint'] = current_fingerprint
+
+        # 绑定或校验
+        if not qrcode.is_bound:
+            qrcode.is_bound = True
+            qrcode.bound_user = current_user
+            qrcode.bound_fingerprint = current_fingerprint
+            qrcode.save(update_fields=['is_bound', 'bound_user', 'bound_fingerprint'])
+        else:
+            # 校验身份
+            if qrcode.bound_user and qrcode.bound_user != current_user:
+                return render(request, 'error.html', {'message': '此二维码已被其他用户绑定，无法使用'})
+            if qrcode.bound_fingerprint and qrcode.bound_fingerprint != current_fingerprint:
+                return render(request, 'error.html', {'message': '此二维码已被其他设备绑定，无法使用'})
+
+        # 标记为已分享（如果尚未），确保普通提交不会抢走
+        if not qrcode.is_shared:
+            qrcode.is_shared = True
+            qrcode.save(update_fields=['is_shared'])
+
+        # 将二维码ID存入 session，供提交时使用
+        request.session['active_qrcode_id'] = qr_code_id
+
+        return redirect('survey_landing', survey_uuid=questionnaire.id)
 
 def get_qrcode_image(request, qr_code_id):
     qrcode_obj = get_object_or_404(QuestionnaireQRCode, qr_code_id=qr_code_id)

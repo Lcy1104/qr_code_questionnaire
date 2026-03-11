@@ -47,7 +47,7 @@ def create_from_template(request, template_id):
     template = get_object_or_404(Questionnaire, id=template_id, is_template=True)
     #request.session['template_id'] = str(template.id)   # 仍用于预填充问题
     # 改为 URL 参数传递标记
-    return redirect(f"{reverse('create_questionnaire')}?from_template=1")
+    return redirect(f"{reverse('create_questionnaire')}?from_template=1&template_id={template_id}")
 
 @login_required
 def check_questionnaire_status(request, questionnaire_id):
@@ -187,7 +187,7 @@ def answer_questions(request, questionnaire_id):
         else:
             return redirect('select_target', questionnaire_id=questionnaire.id)
 
-    # GET 请求：显示问题页面（只读取 session，不删除）
+    # GET 请求：显示问题                                                                                                                                                                                                                                                                                                                                                                                       页面（只读取 session，不删除）
     if request.method == 'GET':
         target = request.session.get('selected_target') if questionnaire.targets else None
         questions = questionnaire.questions.all().order_by('order')
@@ -198,13 +198,55 @@ def answer_questions(request, questionnaire_id):
             'is_anonymous': is_anonymous,
         })
 
-    # POST 请求：提交答卷（handle_survey_submission 内部会从 session pop 并保存 target）
-    from .views_survey import handle_survey_submission
-    if is_anonymous:
-        # 由于 request.POST 不可变，可以复制后添加
-        request.POST = request.POST.copy()
-        request.POST['anonymous'] = '1'
-    return handle_survey_submission(request, questionnaire_id=questionnaire.id)
+        # POST 请求：提交答卷
+    if request.method == 'POST':
+        from .views_survey import handle_survey_submission
+        import json
+
+        original_post = request.POST
+        # 复制 POST 数据并添加匿名标志
+        post_data = request.POST.copy()
+        if is_anonymous:
+            post_data['anonymous'] = '1'
+
+        # 临时替换 request.POST
+        original_post = request.POST
+        request.POST = post_data
+
+        try:
+            response = handle_survey_submission(request, questionnaire_id=questionnaire.id)
+        finally:
+            request.POST = original_post
+
+        # 如果是 JsonResponse，解析并执行重定向
+        if isinstance(response, JsonResponse):
+            try:
+                data = json.loads(response.content)
+                # 根据 handle_survey_submission 返回的格式：{'ok': True, 'redirect': ...} 或 {'ok': False, 'msg': ...}
+                if data.get('success') or data.get('ok'):  # 兼容两种格式
+                    redirect_url = data.get('redirect')
+                    if redirect_url:
+                        return redirect(redirect_url)  # 跳转到仪表盘或感谢页
+                    else:
+                        # 暂存成功，无 redirect，刷新当前页面（保留匿名参数）
+                        messages.success(request, data.get('msg', '草稿已保存'))
+                        if is_anonymous:
+                            return redirect(f"{reverse('answer_questions', args=[questionnaire.id])}?anonymous=1")
+                        else:
+                            return redirect('answer_questions', questionnaire_id=questionnaire.id)
+                else:
+                    messages.error(request, data.get('msg', '提交失败'))
+            except Exception as e:
+                messages.error(request, f'提交处理异常: {str(e)}')
+        else:
+            # 如果不是 JsonResponse（极少情况），直接返回
+            return response
+
+        # 提交失败，重定向回答题页（保留参数）
+        if is_anonymous:
+            return redirect(f"{reverse('answer_questions', args=[questionnaire.id])}?anonymous=1")
+        else:
+            return redirect('answer_questions', questionnaire_id=questionnaire.id)
 
 @login_required
 def create_questionnaire(request):
@@ -234,6 +276,21 @@ def create_questionnaire(request):
 
             questionnaire = form.save(commit=False)
             questionnaire.creator = request.user
+
+            if request.POST.get('from_template') == '1':
+                questionnaire.from_template = True
+                template_id = request.POST.get('template_id')
+                logger.debug(f"===== from_template=1, template_id received: {template_id} =====")  # 日志1
+                if template_id:
+                    try:
+                        template = Questionnaire.objects.get(id=template_id, is_template=True)
+                        logger.debug(f"===== template found, is_multi_target = {template.is_multi_target} =====")  # 日志2
+                        questionnaire.is_multi_target = template.is_multi_target
+                        questionnaire.targets = template.targets
+                        logger.debug(f"===== after assignment, questionnaire.is_multi_target = {questionnaire.is_multi_target} =====")  # 日志3
+                    except Questionnaire.DoesNotExist:
+                        logger.debug(f"===== template with id {template_id} not found =====")  # 日志4
+                        pass
 
             # 从 POST 数据中读取隐藏字段 from_template（值为 '1' 或 None）
             if request.POST.get('from_template') == '1':
@@ -330,10 +387,11 @@ def create_questionnaire(request):
         question_formset = QuestionFormSet()
         # 从 URL 获取 from_template 参数，保持原始字符串（可能是 '1' 或 None）
         from_template_raw = request.GET.get('from_template')
+        template_id = request.GET.get('template_id')
         import sys
         print(f"===== DEBUG: request.GET = {request.GET} =====", file=sys.stderr)
         print(f"===== DEBUG: from_template_raw = {from_template_raw} =====", file=sys.stderr)
-        template_id = request.session.pop('template_id', None)
+        #template_id = request.session.pop('template_id', None)
         if template_id:
             try:
                 template = Questionnaire.objects.get(id=template_id, is_template=True)
@@ -350,6 +408,7 @@ def create_questionnaire(request):
             'form': form,
             'question_formset': question_formset,
             'from_template_raw': from_template_raw,  # 统一为 from_template_raw
+            'template_id': template_id,
         })
 
 @login_required
@@ -1520,7 +1579,17 @@ def response_detail(request, response_id):
         return redirect('dashboard')
 
     answers = response.answer_items.all().select_related('question').order_by('question__order')
+    other_responses = Response.objects.none()  # 默认为空
+    if response.questionnaire.is_multi_target:
+        # 获取同一问卷、同一用户的所有已提交答卷（排除当前这条）
+        other_responses = Response.objects.filter(
+            questionnaire=response.questionnaire,
+            user=response.user,
+            is_submitted=True
+        ).exclude(id=response.id).select_related('user', 'qrcode').order_by('submitted_at')
+
     return render(request, 'questionnaire/response_detail.html', {
         'response': response,
         'answers': answers,
+        'other_responses': other_responses,  # 传递给模板
     })

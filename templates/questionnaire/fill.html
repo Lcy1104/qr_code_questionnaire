@@ -1,118 +1,271 @@
 <!-- questionnaire/templates/questionnaire/fill.html -->
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-    <title>填写问卷 - {{ questionnaire.title }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ questionnaire.title }} - 问卷填写</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .questionnaire-header { background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
-        .question { margin-bottom: 25px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; }
-        .question-text { font-size: 18px; font-weight: bold; margin-bottom: 15px; }
-        .required { color: red; }
-        .submit-btn { padding: 15px 40px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 18px; cursor: pointer; }
-        .submit-btn:hover { background: #0056b3; }
-        .user-info { background: #e7f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
+        .question-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        .question-text {
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        .required-star { color: red; }
+        .submit-btn { min-width: 150px; padding: 12px; }
+        .target-info {
+            background-color: #e7f5ff;
+            border-left: 4px solid #0d6efd;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+        }
+        .progress-container { margin-bottom: 30px; }
     </style>
 </head>
 <body>
-    <div class="questionnaire-header">
-        <h1>{{ questionnaire.title }}</h1>
-        <p>{{ questionnaire.description }}</p>
-        <div class="user-info">
-            填写者：{{ request.user.username }} | 请认真填写每个问题
+    {% include 'navbar.html' %}
+    <div class="container mt-4 mb-5">
+        <div class="questionnaire-header">
+            <h1 class="text-center">{{ questionnaire.title }}</h1>
+            {% if questionnaire.description %}
+                <p class="text-center mt-3">{{ questionnaire.description }}</p>
+            {% endif %}
         </div>
-    </div>
 
-    <form id="surveyForm">
-        {% csrf_token %}
-        {% if is_anonymous_mode %}
-            <input type="hidden" name="anonymous" value="1">
+        {% if current_target %}
+        <div class="target-info">
+            <strong>正在评价：</strong> {{ current_target }}
+        </div>
         {% endif %}
-        {% for question in questions %}
-            <div class="question">
+
+        <!-- 进度条 -->
+        <div class="progress-container">
+            <div class="d-flex justify-content-between mb-1">
+                <span>填写进度</span>
+                <span><span id="answered-count">0</span>/{{ questions|length }}</span>
+            </div>
+            <div class="progress" style="height: 8px;">
+                <div id="progress-bar" class="progress-bar" style="width: 0"></div>
+            </div>
+        </div>
+
+        <form id="surveyForm">
+            {% csrf_token %}
+            <input type="hidden" name="action" id="action" value="submit">
+            {% if current_target %}
+                <input type="hidden" name="target_name" value="{{ current_target }}">
+            {% endif %}
+            {% if is_anonymous_mode %}
+                <input type="hidden" name="anonymous" value="1">
+                <input type="hidden" name="device_fingerprint" id="device_fingerprint" value="">
+            {% endif %}
+
+            {% for q in questions %}
+            <div class="question-card" id="question-{{ q.id }}">
                 <div class="question-text">
-                    {{ forloop.counter }}. {{ question.title }}
-                    {% if question.is_required %}<span class="required">*</span>{% endif %}
+                    <span class="question-number">{{ forloop.counter }}.</span>
+                    {{ q.text }}
+                    {% if q.required %}<span class="required-star">*</span>{% endif %}
                 </div>
-                {% if question.required %}
-                    <small class="text-muted">此题必填</small>
-                {% endif %}
-                {% if question.type == 'text' %}
-                    <input type="hidden" name="maxlen_{{ question.id }}" value="{{ question.max_length }}">
-                    <textarea name="q_{{ question.id }}" rows="4" style="width: 100%;"
-                              {% if question.is_required %}required{% endif %}></textarea>
+
+                {% if q.question_type == 'radio' %}
+                    <!-- 单选题 -->
+                    {% if q.options %}
+                        {% for opt in q.options %}
+                        <div class="option-item form-check">
+                            <input class="form-check-input question-input"
+                                   type="radio"
+                                   name="question_{{ q.id }}"
+                                   id="option_{{ q.id }}_{{ forloop.counter0 }}"
+                                   value="{{ forloop.counter0 }}"
+                                   {% if q.required %}required{% endif %}
+                                   data-question-id="{{ q.id }}">
+                            <label class="form-check-label" for="option_{{ q.id }}_{{ forloop.counter0 }}">
+                                {{ opt }}
+                            </label>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+
+                {% elif q.question_type == 'checkbox' %}
+                    <!-- 多选题 -->
+                    {% if q.options %}
+                        {% for opt in q.options %}
+                        <div class="option-item form-check">
+                            <input class="form-check-input question-input"
+                                   type="checkbox"
+                                   name="question_{{ q.id }}"
+                                   id="option_{{ q.id }}_{{ forloop.counter0 }}"
+                                   value="{{ forloop.counter0 }}"
+                                   data-question-id="{{ q.id }}">
+                            <label class="form-check-label" for="option_{{ q.id }}_{{ forloop.counter0 }}">
+                                {{ opt }}
+                            </label>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+
+                {% elif q.question_type == 'text' %}
+                    <!-- 简答题 -->
+                    <input type="hidden" name="maxlen_{{ q.id }}" value="{{ q.max_length }}">
+                    <textarea class="form-control question-input"
+                              name="question_{{ q.id }}"
+                              rows="3"
+                              {% if q.required %}required{% endif %}
+                              data-question-id="{{ q.id }}"
+                              placeholder="请输入您的回答..."
+                              {% if q.max_length > 0 %}maxlength="{{ q.max_length }}"{% endif %}></textarea>
                     <small class="text-muted">
-                        {% if question.max_length %}最多 {{ question.max_length }} 字{% else %}字数不限{% endif %}
+                        {% if q.max_length > 0 %}最多 {{ q.max_length }} 字{% else %}字数不限{% endif %}
                     </small>
-
-                {% elif question.type == 'single' %}
-                    {% for option in question.options %}
-                        <div style="margin-bottom: 8px;">
-                            <input type="radio" name="q_{{ question.id }}" value="{{ forloop.counter0 }}">
-                                   {% if question.is_required %}required{% endif %}>
-                            <label>{{ option }}</label>
-                        </div>
-                    {% endfor %}
-
-                {% elif question.type == 'multiple' %}
-                    {% for option in question.options %}
-                        <div style="margin-bottom: 8px;">
-                            <input type="checkbox" name="q_{{ question.id }}" value="{{ forloop.counter0 }}">
-                            <label>{{ option }}</label>
-                        </div>
-                    {% endfor %}
                 {% endif %}
             </div>
-        {% endfor %}
+            {% empty %}
+            <div class="alert alert-warning">该问卷暂无问题。</div>
+            {% endfor %}
 
-        <div style="text-align: center; margin-top: 40px;">
-            <button type="button" id="ajaxSubmit" class="submit-btn">提交问卷</button>
-            <p style="margin-top: 10px; color: #666;">提交后不可修改，请确认您的答案</p>
-        </div>
-    </form>
+            <div class="text-center mt-4">
+                <button type="button" id="draftBtn" class="btn btn-secondary submit-btn me-2">
+                    <span id="draft-text">暂存</span>
+                    <div id="draft-spinner" class="spinner-border spinner-border-sm d-none" role="status"></div>
+                </button>
+                <button type="button" id="submitBtn" class="btn btn-primary submit-btn">
+                    <span id="submit-text">提交问卷</span>
+                    <div id="submit-spinner" class="spinner-border spinner-border-sm d-none" role="status"></div>
+                </button>
+                <a href="{% if questionnaire.is_multi_target %}{% url 'multi_target_dashboard' questionnaire.id %}{% else %}{% url 'home' %}{% endif %}" class="btn btn-outline-secondary ms-3">返回</a>
+            </div>
+        </form>
+    </div>
 
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        document.getElementById('ajaxSubmit').addEventListener('click', async () => {
-            const form = document.getElementById('surveyForm');
-            const data = new FormData(form);
-            console.log('>>> 即将发出的 FormData');
-            for (let [k, v] of data.entries()) console.log(k, v);
-            const res = await fetch('{{ request.build_absolute_uri }}submit/', {
-                method: 'POST',
-                body: data,
-                headers: {'X-Requested-With': 'XMLHttpRequest'}
-            });
-            const json = await res.json();
-            console.log('>>> 后端返回', json);
-            if (json.ok) location.href = json.redirect;
-            else alert(json.msg || '提交失败');
-        });
-        /* 简答题字数实时提示 & 超量高亮 */
-        document.addEventListener('DOMContentLoaded', () => {
-            document.querySelectorAll('textarea[name^="q_"]').forEach(ta => {
-                const qId   = ta.name.replace('q_', '');
-                const maxLen = Number(document.querySelector(`input[name="maxlen_${qId}"]`)?.value || 0);
-                const info  = document.createElement('div');
-                info.className = 'text-muted small mt-1';
+        $(document).ready(function() {
+            // 记录开始时间
+            const startTime = new Date().toISOString();
+            localStorage.setItem('startTime', startTime);
+
+            // 进度条更新（简化版，如需更精确可自行扩展）
+            function updateProgress() {
+                const total = {{ questions|length }};
+                let answered = 0;
+                $('.question-card').each(function() {
+                    const qid = this.id.replace('question-', '');
+                    const $inputs = $(`[data-question-id="${qid}"]`);
+                    if ($inputs.length === 0) return;
+
+                    let isAnswered = false;
+                    const first = $inputs.first();
+                    if (first.attr('type') === 'radio') {
+                        isAnswered = $(`[name="${first.attr('name')}"]:checked`).length > 0;
+                    } else if (first.attr('type') === 'checkbox') {
+                        isAnswered = $(`[name="${first.attr('name')}"]:checked`).length > 0;
+                    } else {
+                        isAnswered = $.trim(first.val()) !== '';
+                    }
+                    if (isAnswered) answered++;
+                });
+                const percent = total > 0 ? Math.round((answered / total) * 100) : 0;
+                $('#progress-bar').css('width', percent + '%');
+                $('#answered-count').text(answered);
+            }
+            $('.question-input').on('change input', updateProgress);
+            updateProgress();
+
+            // 字数限制提示
+            $('textarea[name^="question_"]').each(function() {
+                const ta = $(this);
+                const qId = ta.attr('name').replace('question_', '');
+                const maxLen = parseInt($(`input[name="maxlen_${qId}"]`).val() || 0);
+                const info = $('<div class="text-muted small mt-1"></div>');
                 ta.after(info);
-                
-                function update() {
-                    const curr = ta.value.length;
-                    info.textContent = maxLen ? `${curr} / ${maxLen}` : '字数不限';
+                function updateCounter() {
+                    const curr = ta.val().length;
+                    info.text(maxLen ? `${curr} / ${maxLen}` : '字数不限');
                     const over = maxLen && curr > maxLen;
-                    // 超量醒目提示
-                    info.style.color = over ? '#dc3545' : '#6c757d';
-                    info.style.fontWeight = over ? 'bold' : 'normal';
-                    ta.style.border = over ? '1px solid #dc3545' : '';
-                    // 禁用提交按钮
-                    document.getElementById('ajaxSubmit').disabled = over;
-                    // ✅ 关键：超量时在文字后面再补一句醒目说明
-                    if (over) info.innerHTML += '&nbsp;<span style="color:#dc3545;font-weight:bold;">（已超出限制，请删减后再提交）</span>';
+                    info.css('color', over ? '#dc3545' : '#6c757d');
+                    ta.css('border', over ? '1px solid #dc3545' : '');
+                    $('#submitBtn, #draftBtn').prop('disabled', over);
+                    if (over) info.append(' <span style="color:#dc3545;">（已超出限制）</span>');
                 }
-                ta.addEventListener('input', update);
-                update();          // 初始显示
+                ta.on('input', updateCounter);
+                updateCounter();
             });
+
+            // 提交表单（共用函数）
+            function submitForm(actionType) {
+                const btn = actionType === 'submit' ? $('#submitBtn') : $('#draftBtn');
+                const spinner = actionType === 'submit' ? $('#submit-spinner') : $('#draft-spinner');
+                const textSpan = actionType === 'submit' ? $('#submit-text') : $('#draft-text');
+
+                btn.prop('disabled', true);
+                textSpan.text(actionType === 'submit' ? '提交中...' : '暂存中...');
+                spinner.removeClass('d-none');
+
+                $('#action').val(actionType);
+                const formData = $('#surveyForm').serialize() + `&start_time=${localStorage.getItem('startTime')}`;
+
+                $.ajax({
+                    url: "{% url 'submit_response' questionnaire.id %}",
+                    type: 'POST',
+                    data: formData,
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    success: function(res) {
+                        if (res.ok) {
+                            if (actionType === 'draft') {
+                                alert('草稿已保存');
+                                btn.prop('disabled', false);
+                                textSpan.text('暂存');
+                                spinner.addClass('d-none');
+                                //暂存后要自动跳转会，请取消下行注释
+                                //window.location.href = "{% url 'multi_target_dashboard' questionnaire.id %}";
+                            } else {
+                                window.location.href = res.redirect;
+                            }
+                        } else {
+                            alert(res.msg || '操作失败');
+                            btn.prop('disabled', false);
+                            textSpan.text(actionType === 'submit' ? '提交问卷' : '暂存');
+                            spinner.addClass('d-none');
+                        }
+                    },
+                    error: function(xhr) {
+                        let msg = '操作失败，请重试。';
+                        if (xhr.responseJSON && xhr.responseJSON.msg) msg = xhr.responseJSON.msg;
+                        alert(msg);
+                        btn.prop('disabled', false);
+                        textSpan.text(actionType === 'submit' ? '提交问卷' : '暂存');
+                        spinner.addClass('d-none');
+                    }
+                });
+            }
+
+            $('#submitBtn').click(function() { submitForm('submit'); });
+            $('#draftBtn').click(function() { submitForm('draft'); });
         });
     </script>
+    {% if is_anonymous_mode %}
+<script>
+    // 强制以后端传递的 fingerprint 为准，确保与 session 一致
+    (function() {
+        var backendFingerprint = '{{ anonymous_fingerprint|default:"" }}';
+        if (backendFingerprint) {
+            localStorage.setItem('anonymous_visitor_id', backendFingerprint);
+        }
+        var fingerprint = localStorage.getItem('anonymous_visitor_id') || '';
+        document.getElementById('device_fingerprint').value = fingerprint;
+        console.log('[Fingerprint] 最终设备指纹:', fingerprint);
+    })();
+</script>
+{% endif %}
 </body>
 </html>

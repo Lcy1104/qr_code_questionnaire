@@ -62,9 +62,11 @@ urlpatterns = [
     path('survey/<uuid:survey_uuid>/thank-you/', views_survey.survey_thank_you, name='survey_thank_you'),
     path('questionnaires/<uuid:questionnaire_id>/update-time/', dashboard_views.update_questionnaire_time, name='update_questionnaire_time'),
     path('questionnaires/<uuid:questionnaire_id>/update-limit/', dashboard_views.update_questionnaire_limit, name='update_questionnaire_limit'),
+    path('survey/<uuid:questionnaire_id>/multi/', views_survey.multi_target_dashboard, name='multi_target_dashboard'),
     # 问卷状态检查
     path('survey/<uuid:questionnaire_id>/status/', views.check_questionnaire_status, name='check_status'),
     path('survey/<uuid:questionnaire_id>/check/', user_views.check_submitted, name='check_submitted'),
+    path('survey/<uuid:survey_uuid>/fill/', views_survey.survey_fill, name='survey_fill'),
     # 邀请码相关
     path('invite/<str:invite_code>/', user_views.survey_access, name='survey_access_invite'),
     path('survey/<uuid:questionnaire_id>/invite-verify/', verify_invite_only, name='verify_invite_only'),
@@ -103,6 +105,7 @@ urlpatterns = [
     path('questionnaires/<uuid:questionnaire_id>/redirect-wait/', dashboard_views.questionnaire_redirect_wait, name='questionnaire_redirect_wait'),
     path('ajax/batch-operate/', views_ajax.ajax_batch_operate, name='ajax_batch_operate'),
     path('ajax/task-result/', views_ajax.ajax_task_result, name='ajax_task_result'),
+    path('survey/<uuid:questionnaire_id>/batch-submit/', views_survey.handle_batch_submit, name='batch_submit'),
 
     # 通知相关 - 用户端
     path('notifications/', notification_list, name='notification_list'),
@@ -128,7 +131,7 @@ urlpatterns = [
 
     # 新增：创建方式选择
     path('create/choice/', views.create_choice, name='create_choice'),
-
+    path('survey/<uuid:questionnaire_id>/batch-submit/', views_survey.handle_batch_submit, name='batch_submit'),
     # 新增：模板列表
     path('templates/', views.TemplateListView.as_view(), name='template_list'),
     path('templates/<uuid:template_id>/use/', views.create_from_template, name='create_from_template'),
