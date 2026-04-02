@@ -261,8 +261,96 @@ def create_questionnaire(request):
                 questionnaire.save()
                 logger.debug(f"===== after save, questionnaire.is_multi_target = {questionnaire.is_multi_target} =====")
 
+
                 # 保存问题
                 question_count = save_questions_from_post(request, questionnaire)
+
+                # ========== 保存停止条件 ==========
+                global_conditions_json = request.POST.get('global_conditions_json', '[]')
+                try:
+                    global_conditions = json.loads(global_conditions_json)
+                except:
+                    global_conditions = []
+                logger.info(f"===== 接收到的 global_conditions_json: {global_conditions_json}")
+                logger.info(f"===== 解析后的 global_conditions: {global_conditions}")
+                local_conditions_json = request.POST.get('local_conditions_json', '[]')
+                try:
+                    local_conditions = json.loads(local_conditions_json)
+                except:
+                    local_conditions = []
+                logger.info(f"===== 接收到的 local_conditions_json: {local_conditions_json}")
+                logger.info(f"===== 解析后的 local_conditions: {local_conditions}")
+                # 获取问题列表（用于将全局条件的关键词转换为选项索引）
+                questions_list = list(questionnaire.questions.all().order_by('order'))
+                logger.info(f"===== 问题列表 ID: {[q.id for q in questions_list]}")
+                # 使用字典合并相同 (question_id, option_index) 的条件，存储最小阈值
+                merged = {}
+
+                # 处理全局条件（将关键词匹配到选项）
+                # 处理全局条件（遍历所有问题，为每个匹配关键词的选项生成条件）
+                for cond in global_conditions:
+                    if cond.get('type') != 'global':
+                        continue
+                    keyword = cond.get('keyword')
+                    threshold = cond.get('threshold')
+                    logger.info(f"===== 处理全局条件: keyword='{keyword}', threshold={threshold}")
+                    if not keyword or not threshold:
+                        logger.warning("全局条件缺少关键词或阈值，跳过")
+                        continue
+                    # 遍历所有问题，为每个匹配的选项生成条件
+                    for target_question in questions_list:
+                        options = target_question.options
+                        option_index = None
+                        for i, opt in enumerate(options):
+                            if opt.strip().lower() == keyword.strip().lower():
+                                option_index = i
+                                logger.info(f"===== 匹配成功: 问题ID={target_question.id}, 选项文本='{opt}', 索引={i}")
+                                break
+                        if option_index is not None:
+                            key = (str(target_question.id), option_index)
+                            if key not in merged or threshold < merged[key]:
+                                merged[key] = threshold
+                                logger.info(f"===== 添加/更新 merged: key={key}, threshold={threshold}")
+                        else:
+                            logger.info(f"===== 问题 {target_question.id} 中没有匹配 '{keyword}' 的选项")
+                # 处理局部条件
+                # 处理局部条件
+                for cond in local_conditions:
+                    if cond.get('type') != 'per_option':
+                        continue
+                    option_index = cond.get('option_index')
+                    threshold = cond.get('threshold')
+                    if option_index is None or not threshold:
+                        continue
+                    # 优先使用 question_id
+                    qid = cond.get('question_id')
+                    target_question = None
+                    if qid:
+                        target_question = next((q for q in questions_list if str(q.id) == qid), None)
+                    else:
+                        # 使用 question_index（1-based）查找
+                        q_idx = cond.get('question_index')
+                        if q_idx and 1 <= q_idx <= len(questions_list):
+                            target_question = questions_list[q_idx - 1]
+                    if target_question:
+                        key = (str(target_question.id), option_index)
+                        if key not in merged or threshold < merged[key]:
+                            merged[key] = threshold
+
+                # 转换为最终列表
+                stop_conditions = []
+                for (qid, option_index), threshold in merged.items():
+                    stop_conditions.append({
+                        'type': 'per_option',
+                        'question_id': qid,
+                        'option_index': option_index,
+                        'threshold': threshold
+                    })
+                logger.info(f"===== 最终 merged: {merged}")
+                logger.info(f"===== 最终 stop_conditions: {stop_conditions}")
+                questionnaire.stop_condition = stop_conditions
+                questionnaire.save()
+                # ========== 保存结束 ==========
 
                 if question_count == 0:
                     messages.error(request, '发布问卷必须至少有一个问题')
@@ -313,6 +401,70 @@ def create_questionnaire(request):
 
                 # 保存问题
                 save_questions_from_post(request, questionnaire)
+                # ========== 保存停止条件 ==========
+                global_conditions_json = request.POST.get('global_conditions_json', '[]')
+                try:
+                    global_conditions = json.loads(global_conditions_json)
+                except:
+                    global_conditions = []
+                logger.info(f"===== 接收到的 global_conditions_json: {global_conditions_json}")
+                logger.info(f"===== 解析后的 global_conditions: {global_conditions}")
+                local_conditions_json = request.POST.get('local_conditions_json', '[]')
+                try:
+                    local_conditions = json.loads(local_conditions_json)
+                except:
+                    local_conditions = []
+                logger.info(f"===== 接收到的 local_conditions_json: {local_conditions_json}")
+                logger.info(f"===== 解析后的 local_conditions: {local_conditions}")
+                # 获取问题列表（用于将全局条件的关键词转换为选项索引）
+                questions_list = list(questionnaire.questions.all().order_by('order'))
+                logger.info(f"===== 问题列表 ID: {[q.id for q in questions_list]}")
+
+                # 使用字典合并相同 (question_id, option_index) 的条件，存储最小阈值
+                merged = {}
+
+                # 处理全局条件（将关键词匹配到选项）
+                # 处理全局条件（遍历所有问题，为每个匹配关键词的选项生成条件）
+                for cond in global_conditions:
+                    if cond.get('type') != 'global':
+                        continue
+                    keyword = cond.get('keyword')
+                    threshold = cond.get('threshold')
+                    logger.info(f"===== 处理全局条件: keyword='{keyword}', threshold={threshold}")
+                    if not keyword or not threshold:
+                        logger.warning("全局条件缺少关键词或阈值，跳过")
+                        continue
+                    # 遍历所有问题，为每个匹配的选项生成条件
+                    for target_question in questions_list:
+                        options = target_question.options
+                        option_index = None
+                        for i, opt in enumerate(options):
+                            if opt.strip().lower() == keyword.strip().lower():
+                                option_index = i
+                                logger.info(f"===== 匹配成功: 问题ID={target_question.id}, 选项文本='{opt}', 索引={i}")
+                                break
+                        if option_index is not None:
+                            key = (str(target_question.id), option_index)
+                            if key not in merged or threshold < merged[key]:
+                                merged[key] = threshold
+                                logger.info(f"===== 添加/更新 merged: key={key}, threshold={threshold}")
+                        else:
+                            logger.info(f"===== 问题 {target_question.id} 中没有匹配 '{keyword}' 的选项")
+
+                # 转换为最终列表
+                stop_conditions = []
+                for (qid, option_index), threshold in merged.items():
+                    stop_conditions.append({
+                        'type': 'per_option',
+                        'question_id': qid,
+                        'option_index': option_index,
+                        'threshold': threshold
+                    })
+                logger.info(f"===== 最终 merged: {merged}")
+                logger.info(f"===== 最终 stop_conditions: {stop_conditions}")
+                questionnaire.stop_condition = stop_conditions
+                questionnaire.save()
+                # ========== 保存结束 ==========
 
                 messages.success(request, '问卷已保存为草稿！')
                 return redirect('questionnaire_list')
@@ -346,13 +498,36 @@ def create_questionnaire(request):
                     'is_admin': request.user.is_admin,
                 })
     else:
-        form = QuestionnaireForm()
         from_template = request.GET.get('from_template')
         template_id = request.GET.get('template_id')  # 新增：从 URL 获取模板ID
+        initial_stop_condition = None
+        initial_data = {}
+        if template_id:
+            try:
+                template = Questionnaire.objects.get(id=template_id, is_template=True)
+                initial_data = {
+                    'title': f'副本：{template.title}',
+                    'description': template.description,
+                    'access_type': template.access_type,
+                    'targets': template.targets,
+                    'limit_responses': template.limit_responses,
+                    'max_responses': template.max_responses,
+                    'enable_multi_qrcodes': template.enable_multi_qrcodes,
+                    'start_time': template.start_time,
+                    'end_time': template.end_time,
+                }
+                initial_stop_condition = template.stop_condition
+            except Questionnaire.DoesNotExist:
+                pass
+        if initial_data:
+            form = QuestionnaireForm(initial=initial_data)
+        else:
+            form = QuestionnaireForm()
         return render(request, 'questionnaire/create.html', {
             'form': form,
-            'from_template': from_template,  # 直接传递原始值
+            'from_template': from_template,
             'template_id': template_id,
+            'initial_stop_condition': initial_stop_condition,
             'is_admin': request.user.is_admin
         })
     '''return render(request, 'questionnaire/create.html', {
@@ -372,6 +547,96 @@ def edit_questionnaire(request, questionnaire_id):
         if form.is_valid() and question_formset.is_valid():
             form.save()
             question_formset.save()
+            questionnaire = form.instance
+
+            # 获取问题列表，用于局部条件查找
+            questions_list = list(questionnaire.questions.all().order_by('order'))
+
+            # ========== 保存停止条件 ==========
+            global_conditions_json = request.POST.get('global_conditions_json', '[]')
+            try:
+                global_conditions = json.loads(global_conditions_json)
+            except:
+                global_conditions = []
+            logger.info(f"===== 接收到的 global_conditions_json: {global_conditions_json}")
+            logger.info(f"===== 解析后的 global_conditions: {global_conditions}")
+            local_conditions_json = request.POST.get('local_conditions_json', '[]')
+            try:
+                local_conditions = json.loads(local_conditions_json)
+            except:
+                local_conditions = []
+            logger.info(f"===== 接收到的 local_conditions_json: {local_conditions_json}")
+            logger.info(f"===== 解析后的 local_conditions: {local_conditions}")
+            # 获取问题列表（用于将全局条件的关键词转换为选项索引）
+            questions_list = list(questionnaire.questions.all().order_by('order'))
+            logger.info(f"===== 问题列表 ID: {[q.id for q in questions_list]}")
+            # 使用字典合并相同 (question_id, option_index) 的条件，存储最小阈值
+            merged = {}
+
+            # 处理全局条件（将关键词匹配到选项）
+            # 处理全局条件（遍历所有问题，为每个匹配关键词的选项生成条件）
+            for cond in global_conditions:
+                if cond.get('type') != 'global':
+                    continue
+                keyword = cond.get('keyword')
+                threshold = cond.get('threshold')
+                logger.info(f"===== 处理全局条件: keyword='{keyword}', threshold={threshold}")
+                if not keyword or not threshold:
+                    logger.warning("全局条件缺少关键词或阈值，跳过")
+                    continue
+                # 遍历所有问题，为每个匹配的选项生成条件
+                for target_question in questions_list:
+                    options = target_question.options
+                    option_index = None
+                    for i, opt in enumerate(options):
+                        if opt.strip().lower() == keyword.strip().lower():
+                            option_index = i
+                            logger.warning("全局条件缺少关键词或阈值，跳过")
+                            break
+                    if option_index is not None:
+                        key = (str(target_question.id), option_index)
+                        if key not in merged or threshold < merged[key]:
+                            merged[key] = threshold
+                            logger.info(f"===== 添加/更新 merged: key={key}, threshold={threshold}")
+                    else:
+                        logger.info(f"===== 问题 {target_question.id} 中没有匹配 '{keyword}' 的选项")
+            # 处理局部条件
+            # 处理局部条件
+            for cond in local_conditions:
+                if cond.get('type') != 'per_option':
+                    continue
+                option_index = cond.get('option_index')
+                threshold = cond.get('threshold')
+                if option_index is None or not threshold:
+                    continue
+                # 优先使用 question_id
+                qid = cond.get('question_id')
+                target_question = None
+                if qid:
+                    target_question = next((q for q in questions_list if str(q.id) == qid), None)
+                else:
+                    # 使用 question_index（1-based）查找
+                    q_idx = cond.get('question_index')
+                    if q_idx and 1 <= q_idx <= len(questions_list):
+                        target_question = questions_list[q_idx - 1]
+                if target_question:
+                    key = (str(target_question.id), option_index)
+                    if key not in merged or threshold < merged[key]:
+                        merged[key] = threshold
+
+            # 转换为最终列表
+            stop_conditions = []
+            for (qid, option_index), threshold in merged.items():
+                stop_conditions.append({
+                    'type': 'per_option',
+                    'question_id': qid,
+                    'option_index': option_index,
+                    'threshold': threshold
+                })
+            logger.info(f"===== 最终 merged: {merged}")
+            logger.info(f"===== 最终 stop_conditions: {stop_conditions}")
+            questionnaire.stop_condition = stop_conditions
+            questionnaire.save()
             messages.success(request, '问卷已保存！')
             return redirect('questionnaire_detail', questionnaire_id=questionnaire.id)
     else:
@@ -503,13 +768,13 @@ def questionnaire_detail(request, questionnaire_id):
         'submit_count': submit_count,
         'user_has_submitted': user_has_submitted,
         'now': now,
-        # 保留原有 just_created 变量（用于模板自动刷新脚本，但可能已不再需要）
+        'now_iso': now_iso,
+        'closed_reason': questionnaire.closed_reason,  # 新增
         'just_created': request.session.pop('just_created', None) == str(questionnaire_id),
         'current_version_submit_count': current_version_submit_count,
         'user_has_submitted': user_has_submitted,
         'latest_response_version': latest_response_version,
         'end_time_iso': end_time_iso,
-        'now_iso': now_iso,
     })
 
 @login_required

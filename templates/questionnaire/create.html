@@ -6,6 +6,7 @@
     <title>创建问卷</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         .question-item {
             border: 1px solid #dee2e6;
@@ -70,7 +71,8 @@
                     <div class="card-body">
                         <form method="post" id="questionnaireForm" action="">
                             {% csrf_token %}
-
+                            <input type="hidden" name="local_conditions_json" id="local_conditions_json" value="[]">
+                            <input type="hidden" name="global_conditions_json" id="global_conditions_json" value="[]">
                             <!-- 显示表单错误 -->
                             {% if form.errors or form.non_field_errors or question_formset.errors or question_formset.non_form_errors %}
                                 <div class="alert alert-danger">
@@ -193,6 +195,16 @@
                                         公开：任何人都可以填写；私有：需要登录；邀请码：需要输入邀请码
                                     </div>
                                 </div>
+                            <!-- 停止条件设置（高亮底色） -->
+<!-- 停止条件设置（高亮底色） -->
+<div class="mb-4 p-3" style="background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 8px;">
+    <h5><i class="fas fa-stop-circle me-2"></i>全局停止条件</h5>
+    <p class="text-muted small">满足任意一条 → 问卷自动关闭（每个条件针对特定问题）</p>
+    <div id="global-conditions">
+        <!-- 初始空行（将由 JS 动态添加） -->
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary mt-2" onclick="addGlobalCondition()">+ 添加全局条件</button>
+</div>
                                 {% if from_template == '1' %}
                             <!-- 评价目标列表 -->
                                 <!-- 评价目标列表（动态添加/删除） -->
@@ -407,16 +419,23 @@
 
     <!-- 选项模板 -->
     <template id="option-template">
-        <div class="option-input-group">
-            <div class="input-group">
-                <span class="input-group-text option-letter">A</span>
-                <input type="text" class="form-control option-input" placeholder="请输入选项内容">
-                <button type="button" class="btn btn-outline-danger remove-option-btn">
-                    <i class="fas fa-times"></i>
-                </button>
+    <div class="option-input-group">
+        <div class="input-group">
+            <div class="input-group-text" style="padding: 0.375rem 0.75rem;">
+                <input type="checkbox" class="form-check-input mt-0 local-stop-checkbox" onchange="toggleLocalStop(this)">
             </div>
+            <input type="number" class="form-control local-threshold d-none" min="1" placeholder="阈值" style="width: 90px;">
+            <span class="input-group-text option-letter">A</span>
+            <input type="text" class="form-control option-input" placeholder="请输入选项内容">
+            <button type="button" class="btn btn-outline-danger remove-option-btn">
+                <i class="fas fa-times"></i>
+            </button>
         </div>
-    </template>
+        <div class="form-text text-muted small mt-1">
+            勾选后，当该选项被选择次数达到阈值时，问卷自动关闭（可选）。
+        </div>
+    </div>
+</template>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -513,7 +532,46 @@
         });
     }
 }
-
+    // 收集局部停止条件
+function collectLocalConditions() {
+    var localConditions = [];
+    $('.question-item').each(function() {
+        var questionId = $(this).data('question-id');
+        var questionIndex = $(this).data('question-index');
+        $(this).find('.option-input-group').each(function(optIndex) {
+            var checkbox = $(this).find('.local-stop-checkbox')[0];
+            if (checkbox && checkbox.checked) {
+                var threshold = $(this).find('.local-threshold').val();
+                if (threshold && !isNaN(threshold) && parseInt(threshold) > 0) {
+                    localConditions.push({
+                        type: 'per_option',
+                        question_index: parseInt(questionIndex) + 1, // 转为1-based
+                        question_id: questionId,
+                        option_index: optIndex,
+                        threshold: parseInt(threshold)
+                    });
+                }
+            }
+        });
+    });
+    $('#local_conditions_json').val(JSON.stringify(localConditions));
+}
+// 收集全局停止条件
+function collectGlobalConditions() {
+    var globalConditions = [];
+    $('#global-conditions .row').each(function() {
+        var keyword = $(this).find('[name="global_keyword[]"]').val();
+        var threshold = $(this).find('[name="global_thres[]"]').val();
+        if (keyword && keyword.trim() && threshold && !isNaN(parseInt(threshold))) {
+            globalConditions.push({
+                type: 'global',
+                keyword: keyword.trim(),
+                threshold: parseInt(threshold)
+            });
+        }
+    });
+    $('#global_conditions_json').val(JSON.stringify(globalConditions));
+}
     // 添加新问题
     window.addQuestionForm = function() {
         console.log('添加问题按钮被点击');
@@ -953,7 +1011,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (questionnaireForm) {
         questionnaireForm.addEventListener('submit', function(e) {
         console.log('表单提交验证开始');
-        
+
+        collectGlobalConditions();
+        collectLocalConditions();
+
         // 检查是否有可见的问题
         const visibleQuestions = document.querySelectorAll('.question-item:not([style*="display: none"])');
         console.log(`有 ${visibleQuestions.length} 个可见问题`);
@@ -1072,6 +1133,39 @@ if (limitCheckbox) {
 <script>
     console.log('from_template_raw:', '{{ from_template_raw|default:"" }}');
     console.log('from_template_raw == 1:', {% if from_template_raw == '1' %}true{% else %}false{% endif %});
+</script>
+<script>
+// 添加全局停止条件（只有关键词+阈值，无问题选择）
+function addGlobalCondition() {
+    const container = document.getElementById('global-conditions');
+    const html = `
+    <div class="row g-3 align-items-center mb-2">
+        <div class="col-md-5">
+            <input type="text" class="form-control" name="global_keyword[]" placeholder="关键词（如：优秀）">
+            <div class="form-text small">统计所有答案中包含该关键词的次数</div>
+        </div>
+        <div class="col-md-4">
+            <input type="number" class="form-control" name="global_thres[]" min="1" placeholder="阈值">
+            <div class="form-text small">达到此数量时关闭问卷</div>
+        </div>
+        <div class="col-md-3">
+            <button type="button" class="btn btn-sm btn-danger w-100" onclick="this.parentElement.parentElement.remove()">−</button>
+        </div>
+    </div>`;
+    container.insertAdjacentHTML('beforeend', html);
+}
+
+// 切换局部停止条件输入框
+function toggleLocalStop(checkbox) {
+    // 从复选框向上查找 .input-group，再在该组内查找 .local-threshold
+    const input = checkbox.closest('.input-group').querySelector('.local-threshold');
+    if (checkbox.checked) {
+        input.classList.remove('d-none');
+    } else {
+        input.classList.add('d-none');
+        input.value = '';
+    }
+}
 </script>
 </body>
 </html>

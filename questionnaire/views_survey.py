@@ -1,8 +1,8 @@
 # questionnaire/views_survey.py
 import logging
 import time
-import json  # ===== 新增 =====
-import uuid  # ===== 新增 =====
+import json
+import uuid
 from django.views.decorators.cache import never_cache
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -13,8 +13,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .forms import SelectTargetForm
-from .models import Questionnaire, Response, Answer, QuestionnaireQRCode
-from .notification_manager import NotificationManager
+from .models import Questionnaire, Response, Answer, QuestionnaireQRCode,Question
+from .notification_manager  import NotificationManager
 from django.contrib import messages
 from django.core.cache import cache  # ===== 新增（移到顶部统一导入）=====
 
@@ -27,6 +27,21 @@ def survey_landing(request, survey_uuid):
     """
     questionnaire = get_object_or_404(Questionnaire, id=survey_uuid, status='published')
 
+    stop_condition_closed = False
+    stop_reason = None
+    if questionnaire.status == 'closed':
+        stop_condition_closed = True
+        if questionnaire.closed_reason:
+            stop_reason = questionnaire.closed_reason
+        else:
+            # 兼容旧数据（如果还有字典格式）
+            if isinstance(questionnaire.stop_condition, dict) and questionnaire.stop_condition.get('keyword'):
+                keyword = questionnaire.stop_condition.get('keyword')
+                threshold = questionnaire.stop_condition.get('threshold', 0)
+                stop_reason = f"由于“{keyword}”数量已达到{threshold}，问卷已关闭。"
+            else:
+                stop_reason = "问卷已关闭。"
+
     if questionnaire.status != 'published':
         return render(request, 'questionnaire/not_available.html', {
             'questionnaire': questionnaire,
@@ -36,6 +51,8 @@ def survey_landing(request, survey_uuid):
     context = {
         'questionnaire': questionnaire,
         'user_is_authenticated': request.user.is_authenticated,
+        'stop_condition_closed': stop_condition_closed,  # 新增
+        'stop_reason': stop_reason,  # 新增
     }
 
     if questionnaire.is_multi_target:
@@ -424,7 +441,69 @@ def handle_survey_submission(request, questionnaire_id):
             # 更新问卷提交计数
             questionnaire.submit_count += 1
             questionnaire.save()
+            # ========== 检查停止条件 ==========
+            stop_conditions = questionnaire.stop_condition
+            if stop_conditions and isinstance(stop_conditions, list):
+                # 按目标维护计数：target_counts[target_name][(question_id, option_index)] = count
+                target_counts = {}
+                trigger_info = []  # 存储所有触发的 (target_name, cond, answer)
 
+                # 获取所有已提交答案（包含当前提交的），按时间排序
+                answers = Answer.objects.filter(
+                    response__questionnaire=questionnaire,
+                    response__is_submitted=True
+                ).select_related('question', 'response').order_by('response__submitted_at', 'id')
+
+                for ans in answers:
+                    target_name = ans.response.target_name or ''
+                    q_id = str(ans.question.id)
+                    if ans.question.question_type in ['radio', 'checkbox'] and ans.answer_text:
+                        for letter in ans.answer_text:
+                            option_index = ord(letter) - 65
+                            for cond in stop_conditions:
+                                if cond['question_id'] == q_id and cond['option_index'] == option_index:
+                                    if target_name not in target_counts:
+                                        target_counts[target_name] = {}
+                                    key = (q_id, option_index)
+                                    target_counts[target_name][key] = target_counts[target_name].get(key, 0) + 1
+                                    if target_counts[target_name][key] >= cond['threshold']:
+                                        # 检查是否已经记录过这个条件（避免重复）
+                                        already_triggered = any(
+                                            t[0] == target_name and t[1]['question_id'] == q_id and t[1][
+                                                'option_index'] == option_index
+                                            for t in trigger_info
+                                        )
+                                        if not already_triggered:
+                                            trigger_info.append((target_name, cond, ans))
+                    # 简答题类似扩展，如需支持可自行添加
+
+                if trigger_info:
+                    # 生成关闭原因
+                    reasons = []
+                    for target_name, cond, ans in trigger_info:
+                        q_text = ans.question.text
+                        option_text = ans.question.options[cond['option_index']]
+                        reasons.append(f"评价目标“{target_name}”在问题“{q_text}”中选择了“{option_text}”")
+                    # 假设所有触发条件的阈值相同（全局条件相同关键词的阈值一致），取最后一个的阈值
+                    last_threshold = trigger_info[-1][1]['threshold']
+                    close_reason = "，".join(reasons) + f"，使得该选项被选择次数达到{last_threshold}次"
+
+                    questionnaire.status = 'closed'
+                    questionnaire.closed_reason = close_reason
+                    questionnaire.save(update_fields=['status', 'closed_reason'])
+                    try:
+                        from .notification_manager import NotificationManager
+                        NotificationManager.create_notification(
+                            user=questionnaire.creator,
+                            title=f"问卷已自动关闭：{questionnaire.title}",
+                            message=close_reason,
+                            notification_type='system',
+                            related_questionnaire=questionnaire,
+                            priority='high'
+                        )
+                    except Exception as e:
+                        logger.error(f"发送关闭通知失败: {e}")
+            # ========== 停止条件检查结束 ==========
             # 发送通知（原有代码）
             try:
                 NotificationManager.create_notification(
@@ -505,8 +584,6 @@ def handle_survey_submission(request, questionnaire_id):
 
     # ========== 匿名用户分支：新增，完全独立 ==========
     else:
-        # 匿名用户分支也需要类似修改，但为节省篇幅，此处省略详细修改，实际使用时需同步修改
-        # 下面给出修改后的匿名分支完整代码（确保保留所有原有检查，并支持暂存）
         from django.core.cache import cache
         from django.db import IntegrityError
 
@@ -652,8 +729,71 @@ def handle_survey_submission(request, questionnaire_id):
 
             questionnaire.submit_count += 1
             questionnaire.save()
+            # ========== 检查停止条件 ==========
+            stop_conditions = questionnaire.stop_condition
+            if stop_conditions and isinstance(stop_conditions, list):
+                # 按目标维护计数：target_counts[target_name][(question_id, option_index)] = count
+                target_counts = {}
+                trigger_info = []  # 存储所有触发的 (target_name, cond, answer)
 
+                # 获取所有已提交答案（包含当前提交的），按时间排序
+                answers = Answer.objects.filter(
+                    response__questionnaire=questionnaire,
+                    response__is_submitted=True
+                ).select_related('question', 'response').order_by('response__submitted_at', 'id')
+
+                for ans in answers:
+                    target_name = ans.response.target_name or ''
+                    q_id = str(ans.question.id)
+                    if ans.question.question_type in ['radio', 'checkbox'] and ans.answer_text:
+                        for letter in ans.answer_text:
+                            option_index = ord(letter) - 65
+                            for cond in stop_conditions:
+                                if cond['question_id'] == q_id and cond['option_index'] == option_index:
+                                    if target_name not in target_counts:
+                                        target_counts[target_name] = {}
+                                    key = (q_id, option_index)
+                                    target_counts[target_name][key] = target_counts[target_name].get(key, 0) + 1
+                                    if target_counts[target_name][key] >= cond['threshold']:
+                                        # 检查是否已经记录过这个条件（避免重复）
+                                        already_triggered = any(
+                                            t[0] == target_name and t[1]['question_id'] == q_id and t[1][
+                                                'option_index'] == option_index
+                                            for t in trigger_info
+                                        )
+                                        if not already_triggered:
+                                            trigger_info.append((target_name, cond, ans))
+                    # 简答题类似扩展，如需支持可自行添加
+
+                if trigger_info:
+                    # 生成关闭原因
+                    reasons = []
+                    for target_name, cond, ans in trigger_info:
+                        q_text = ans.question.text
+                        option_text = ans.question.options[cond['option_index']]
+                        reasons.append(f"评价目标“{target_name}”在问题“{q_text}”中选择了“{option_text}”")
+                    # 假设所有触发条件的阈值相同（全局条件相同关键词的阈值一致），取最后一个的阈值
+                    last_threshold = trigger_info[-1][1]['threshold']
+                    close_reason = "，".join(reasons) + f"，使得该选项被选择次数达到{last_threshold}次"
+
+                    questionnaire.status = 'closed'
+                    questionnaire.closed_reason = close_reason
+                    questionnaire.save(update_fields=['status', 'closed_reason'])
+                    try:
+                        from .notification_manager import NotificationManager
+                        NotificationManager.create_notification(
+                            user=questionnaire.creator,
+                            title=f"问卷已自动关闭：{questionnaire.title}",
+                            message=close_reason,
+                            notification_type='system',
+                            related_questionnaire=questionnaire,
+                            priority='high'
+                        )
+                    except Exception as e:
+                        logger.error(f"发送关闭通知失败: {e}")
+            # ========== 停止条件检查结束 ==========
             try:
+                from .notification_manager import NotificationManager
                 NotificationManager.create_notification(
                     user=questionnaire.creator,
                     title=f"新答卷：{questionnaire.title}",
@@ -719,17 +859,22 @@ def survey_thank_you(request, survey_uuid):
     """感谢页面"""
     questionnaire = get_object_or_404(Questionnaire, id=survey_uuid)
     return render(request, 'questionnaire/already_submitted.html', {
-        'questionnaire': questionnaire
+        'questionnaire': questionnaire,
     })
 
 # ===== 新增：多目标仪表盘视图 =====
 def multi_target_dashboard(request, questionnaire_id):
-    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status='published', is_multi_target=True)
+    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, is_multi_target=True)
 
     can_access, reason = questionnaire.can_be_accessed_by(user=request.user)
     if not can_access:
-        messages.error(request, reason)
-        return redirect('home')
+        # 如果问卷已关闭且有具体关闭原因，使用 closed_reason 作为详细原因
+        display_reason = questionnaire.closed_reason if (
+                    questionnaire.status == 'closed' and questionnaire.closed_reason) else reason
+        return render(request, 'questionnaire/not_available.html', {
+            'questionnaire': questionnaire,
+            'reason': display_reason
+        })
 
     if not request.user.is_authenticated:
         if 'anon_fingerprint' not in request.session:

@@ -88,10 +88,16 @@ class Questionnaire(models.Model):
     creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_questionnaires',
                                 verbose_name='创建者')
     from_template = models.BooleanField(default=False, verbose_name='是否从模板创建')
-
+    stop_condition = models.JSONField(
+        default=dict,  # 改为列表
+        blank=True,
+        verbose_name='停止条件列表',
+        help_text='格式：[{"type":"global","question_id":"uuid","option_value":"优秀","threshold":7},{"type":"per_option","question_id":"uuid","option_index":0,"threshold":3}]'
+    )
     # 发布设置
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name='状态')
     version = models.IntegerField(default=1, verbose_name='版本号')
+    closed_reason = models.TextField(blank=True, null=True, verbose_name='关闭原因')
     access_type = models.CharField(max_length=20,
                                    choices=[('public', '公开'), ('private', '私有'), ('invite', '仅邀请')],
                                    default='public', verbose_name='访问权限')

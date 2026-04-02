@@ -1,17 +1,30 @@
 # questionnaire/dashboard_views.py
 from django.contrib import messages
+from django.views.decorators.cache import never_cache
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
+from django.db import connection
 from django.views.decorators.http import require_POST
 from .decorators import original_admin_required
 from .forms import QuestionnaireForm, QuestionFormSet
 from .models import User, Questionnaire, Response
 from django.http import HttpResponse
+from django.urls import reverse
+from django.http import JsonResponse
 import json
 from .models import Question
 import logging
 from django.db.models import Count
+from .notification_manager import NotificationManager
+from .cache import get_detail_cache_key, clear_questionnaire_cache
+from django.core.cache import cache
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from .views_qrcode import generate_qrcode_for_questionnaire, generate_multi_qrcodes_for_questionnaire
+from django.views.decorators.http import require_GET
+import time
+from django.db import connection
 
 logger = logging.getLogger('questionnaire')
 def admin_required(view_func):
@@ -36,7 +49,7 @@ def dashboard(request):
     # 获取当前时间
     today = timezone.now()
 
-    if user.is_admin:
+    if user.is_superuser:
         # 管理员统计
         total_users = User.objects.count()
         total_questionnaires = Questionnaire.objects.count()
@@ -55,6 +68,8 @@ def dashboard(request):
             'today': today,
             'recent_questionnaires': recent_questionnaires,
             'recent_responses': recent_responses,
+            'recent_questionnaires': recent_questionnaires,
+            'recent_responses': recent_responses,
             'is_admin': True
         }
     else:
@@ -69,10 +84,12 @@ def dashboard(request):
                            :5]
 
         context = {
-            'my_questionnaires': my_questionnaires,
+            'total_questionnaires': my_questionnaires,
             'published_questionnaires': published_questionnaires,
             'total_responses': my_responses_count,
             'today': today,
+            'recent_questionnaires': recent_questionnaires,
+            'recent_responses': recent_responses,
             'recent_questionnaires': recent_questionnaires,
             'recent_responses': recent_responses,
             'is_admin': False
@@ -80,14 +97,41 @@ def dashboard(request):
 
     return render(request, 'dashboard/index.html', context)
 
+def get_derived_statuses(questionnaire, now):
+    """计算问卷的派生状态列表，每个元素为 (bootstrap颜色类, 显示文本)"""
+    statuses = []
+
+    # 1. 手动状态优先级最高（已关闭、草稿、已修改）
+    if questionnaire.status == 'closed':
+        statuses.append(('danger', '已关闭'))
+    elif questionnaire.status == 'draft':
+        statuses.append(('secondary', '草稿'))
+    elif questionnaire.status == 'modified':
+        statuses.append(('warning', '已修改'))
+    elif questionnaire.status == 'published':
+        # 已发布问卷，检查自动条件
+        # 待开始
+        if questionnaire.start_time and questionnaire.start_time > now:
+            statuses.append(('info', '待开始'))
+        # 已结束（截止时间已过）
+        if questionnaire.end_time and questionnaire.end_time < now:
+            statuses.append(('dark', '已结束'))
+        # 已满（提交数达到上限）
+        if questionnaire.limit_responses and questionnaire.resp_cnt >= questionnaire.max_responses:
+            statuses.append(('danger', '已满'))
+        # 如果没有任何自动状态，显示“已发布”
+        if not statuses:
+            statuses.append(('success', '已发布'))
+
+    return statuses
 
 @login_required
 def questionnaire_list(request):
     """问卷列表"""
-    if request.user.is_admin:
-        questionnaires = Questionnaire.objects.all().order_by('-created_at')
+    if request.user.is_superuser:
+        questionnaires = Questionnaire.objects.filter(is_template=False).all().order_by('-created_at')
     else:
-        questionnaires = Questionnaire.objects.filter(creator=request.user).order_by('-created_at')
+        questionnaires = Questionnaire.objects.filter(creator=request.user, is_template=False).order_by('-created_at')
 
     status = request.GET.get('status')
     has_inv = request.GET.get('has_invite')
@@ -102,9 +146,13 @@ def questionnaire_list(request):
         questionnaires = questionnaires.annotate(resp_cnt=Count('responses'))
         questionnaires = questionnaires.filter(resp_cnt__gt=0) if has_resp == '1' else questionnaires.filter(resp_cnt=0)
     questionnaires = questionnaires.order_by('-created_at')
+    now = timezone.now()
+    for q in questionnaires:
+        q.derived_statuses = get_derived_statuses(q, now)
     return render(request, 'questionnaire/list.html', {
         'questionnaires': questionnaires,
-        'is_admin': request.user.is_admin
+        'is_admin': request.user.is_superuser,  # 关键：使用 is_superuser
+        'now': now,
     })
 
 def save_questions_from_post(request, questionnaire):
@@ -149,12 +197,14 @@ def save_questions_from_post(request, questionnaire):
 
                 # 处理简答题字数限制
                 elif question_type == 'text':
-                    max_length_field = request.POST.get(f'questions-{prefix}-max_length_field', '0')
+                    max_length_field = request.POST.get(f'questions-{prefix}-max_length', '0').strip()
+                    logger.info(f"[CREATE] 简答题 {question_count + 1}: max_length_field = {max_length_field}")
                     try:
                         max_length = int(max_length_field)
                     except:
                         max_length = 0
                     question.max_length = max_length
+                    logger.info(f"[CREATE] 简答题 {question_count + 1}: 设置 max_length = {max_length}")
 
                 # 保存问题
                 question.save()
@@ -177,6 +227,21 @@ def create_questionnaire(request):
             questionnaire = form.save(commit=False)
             questionnaire.creator = request.user
 
+            # 从 POST 数据中读取 from_template 隐藏字段（值为 '1' 或 None）
+            if request.POST.get('from_template') == '1':
+                template_id = request.POST.get('template_id')
+                logger.debug(f"===== from_template=1, template_id received: {template_id} =====")
+
+                if template_id:
+                    try:
+                        template = Questionnaire.objects.get(id=template_id, is_template=True)
+                        logger.debug(f"===== template found, is_multi_target = {template.is_multi_target} =====")
+                        questionnaire.is_multi_target = template.is_multi_target
+                        questionnaire.targets = template.targets
+                        logger.debug(f"===== after assignment, is_multi_target = {questionnaire.is_multi_target} =====")
+                    except Questionnaire.DoesNotExist:
+                        logger.debug(f"===== template with id {template_id} not found =====")
+
             # 获取保存动作
             save_action = request.POST.get('save_action', 'save_draft')
 
@@ -194,20 +259,141 @@ def create_questionnaire(request):
 
                 # 保存问卷
                 questionnaire.save()
+                logger.debug(f"===== after save, questionnaire.is_multi_target = {questionnaire.is_multi_target} =====")
+
 
                 # 保存问题
                 question_count = save_questions_from_post(request, questionnaire)
+
+                # ========== 保存停止条件 ==========
+                global_conditions_json = request.POST.get('global_conditions_json', '[]')
+                try:
+                    global_conditions = json.loads(global_conditions_json)
+                except:
+                    global_conditions = []
+                logger.info(f"===== 接收到的 global_conditions_json: {global_conditions_json}")
+                logger.info(f"===== 解析后的 global_conditions: {global_conditions}")
+                local_conditions_json = request.POST.get('local_conditions_json', '[]')
+                try:
+                    local_conditions = json.loads(local_conditions_json)
+                except:
+                    local_conditions = []
+                logger.info(f"===== 接收到的 local_conditions_json: {local_conditions_json}")
+                logger.info(f"===== 解析后的 local_conditions: {local_conditions}")
+                # 获取问题列表（用于将全局条件的关键词转换为选项索引）
+                questions_list = list(questionnaire.questions.all().order_by('order'))
+                logger.info(f"===== 问题列表 ID: {[q.id for q in questions_list]}")
+                # 使用字典合并相同 (question_id, option_index) 的条件，存储最小阈值
+                merged = {}
+
+                # 处理全局条件（将关键词匹配到选项）
+                # 处理全局条件（遍历所有问题，为每个匹配关键词的选项生成条件）
+                for cond in global_conditions:
+                    if cond.get('type') != 'global':
+                        continue
+                    keyword = cond.get('keyword')
+                    threshold = cond.get('threshold')
+                    logger.info(f"===== 处理全局条件: keyword='{keyword}', threshold={threshold}")
+                    if not keyword or not threshold:
+                        logger.warning("全局条件缺少关键词或阈值，跳过")
+                        continue
+                    # 遍历所有问题，为每个匹配的选项生成条件
+                    for target_question in questions_list:
+                        options = target_question.options
+                        option_index = None
+                        for i, opt in enumerate(options):
+                            if opt.strip().lower() == keyword.strip().lower():
+                                option_index = i
+                                logger.info(f"===== 匹配成功: 问题ID={target_question.id}, 选项文本='{opt}', 索引={i}")
+                                break
+                        if option_index is not None:
+                            key = (str(target_question.id), option_index)
+                            if key not in merged or threshold < merged[key]:
+                                merged[key] = threshold
+                                logger.info(f"===== 添加/更新 merged: key={key}, threshold={threshold}")
+                        else:
+                            logger.info(f"===== 问题 {target_question.id} 中没有匹配 '{keyword}' 的选项")
+                # 处理局部条件
+                # 处理局部条件
+                for cond in local_conditions:
+                    if cond.get('type') != 'per_option':
+                        continue
+                    option_index = cond.get('option_index')
+                    threshold = cond.get('threshold')
+                    if option_index is None or not threshold:
+                        continue
+                    # 优先使用 question_id
+                    qid = cond.get('question_id')
+                    target_question = None
+                    if qid:
+                        target_question = next((q for q in questions_list if str(q.id) == qid), None)
+                    else:
+                        # 使用 question_index（1-based）查找
+                        q_idx = cond.get('question_index')
+                        if q_idx and 1 <= q_idx <= len(questions_list):
+                            target_question = questions_list[q_idx - 1]
+                    if target_question:
+                        key = (str(target_question.id), option_index)
+                        if key not in merged or threshold < merged[key]:
+                            merged[key] = threshold
+
+                # 转换为最终列表
+                stop_conditions = []
+                for (qid, option_index), threshold in merged.items():
+                    stop_conditions.append({
+                        'type': 'per_option',
+                        'question_id': qid,
+                        'option_index': option_index,
+                        'threshold': threshold
+                    })
+                logger.info(f"===== 最终 merged: {merged}")
+                logger.info(f"===== 最终 stop_conditions: {stop_conditions}")
+                questionnaire.stop_condition = stop_conditions
+                questionnaire.save()
+                # ========== 保存结束 ==========
 
                 if question_count == 0:
                     messages.error(request, '发布问卷必须至少有一个问题')
                     questionnaire.delete()  # 删除空问卷
                     return render(request, 'questionnaire/create.html', {'form': form})
 
+                from .views_qrcode import generate_qrcode_for_questionnaire, generate_multi_qrcodes_for_questionnaire
+                if questionnaire.enable_multi_qrcodes:
+                    generate_multi_qrcodes_for_questionnaire(request, questionnaire)
+                else:
+                    generate_qrcode_for_questionnaire(request, questionnaire)
+
+                has_available_qrcode = True
+                if questionnaire.enable_multi_qrcodes:
+                    has_available_qrcode = questionnaire.qrcodes.filter(is_used=False).exists()
+
+                clear_questionnaire_cache(questionnaire)
+                request.session['just_created'] = str(questionnaire.id)
+                request.session.modified = True
+
+                questions_data = list(questionnaire.questions.all().order_by('order').values(
+                    'id', 'text', 'question_type', 'options', 'required', 'max_length', 'order'
+                ))
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f'questionnaire_{questionnaire.id}',
+                    {
+                        'type': 'questionnaire_updated',
+                        'questionnaire_id': str(questionnaire.id),
+                        'has_available_qrcode': has_available_qrcode,
+                        'questions': questions_data,  # 新增
+                        'submit_count': 0,  # 新增，刚创建为0
+                        'user_has_submitted': False,  # 新增，创建者未提交
+                    }
+                )
                 messages.success(request, '问卷已发布！')
                 # 重定向到二维码页面
                 from .views_qrcode import generate_qrcode
-                return generate_qrcode(request, questionnaire.id)
-
+                # 发布后跳转到问卷详情页
+                #return redirect('questionnaire_detail', questionnaire_id=questionnaire.id)
+                response = redirect('questionnaire_redirect_wait', questionnaire_id=questionnaire.id)
+                response.set_cookie('just_created', str(questionnaire.id), max_age=10)  # 10秒内有效
+                return response
             else:
                 # 保存为草稿
                 questionnaire.status = 'draft'
@@ -215,19 +401,124 @@ def create_questionnaire(request):
 
                 # 保存问题
                 save_questions_from_post(request, questionnaire)
+                # ========== 保存停止条件 ==========
+                global_conditions_json = request.POST.get('global_conditions_json', '[]')
+                try:
+                    global_conditions = json.loads(global_conditions_json)
+                except:
+                    global_conditions = []
+                logger.info(f"===== 接收到的 global_conditions_json: {global_conditions_json}")
+                logger.info(f"===== 解析后的 global_conditions: {global_conditions}")
+                local_conditions_json = request.POST.get('local_conditions_json', '[]')
+                try:
+                    local_conditions = json.loads(local_conditions_json)
+                except:
+                    local_conditions = []
+                logger.info(f"===== 接收到的 local_conditions_json: {local_conditions_json}")
+                logger.info(f"===== 解析后的 local_conditions: {local_conditions}")
+                # 获取问题列表（用于将全局条件的关键词转换为选项索引）
+                questions_list = list(questionnaire.questions.all().order_by('order'))
+                logger.info(f"===== 问题列表 ID: {[q.id for q in questions_list]}")
+
+                # 使用字典合并相同 (question_id, option_index) 的条件，存储最小阈值
+                merged = {}
+
+                # 处理全局条件（将关键词匹配到选项）
+                # 处理全局条件（遍历所有问题，为每个匹配关键词的选项生成条件）
+                for cond in global_conditions:
+                    if cond.get('type') != 'global':
+                        continue
+                    keyword = cond.get('keyword')
+                    threshold = cond.get('threshold')
+                    logger.info(f"===== 处理全局条件: keyword='{keyword}', threshold={threshold}")
+                    if not keyword or not threshold:
+                        logger.warning("全局条件缺少关键词或阈值，跳过")
+                        continue
+                    # 遍历所有问题，为每个匹配的选项生成条件
+                    for target_question in questions_list:
+                        options = target_question.options
+                        option_index = None
+                        for i, opt in enumerate(options):
+                            if opt.strip().lower() == keyword.strip().lower():
+                                option_index = i
+                                logger.info(f"===== 匹配成功: 问题ID={target_question.id}, 选项文本='{opt}', 索引={i}")
+                                break
+                        if option_index is not None:
+                            key = (str(target_question.id), option_index)
+                            if key not in merged or threshold < merged[key]:
+                                merged[key] = threshold
+                                logger.info(f"===== 添加/更新 merged: key={key}, threshold={threshold}")
+                        else:
+                            logger.info(f"===== 问题 {target_question.id} 中没有匹配 '{keyword}' 的选项")
+
+                # 转换为最终列表
+                stop_conditions = []
+                for (qid, option_index), threshold in merged.items():
+                    stop_conditions.append({
+                        'type': 'per_option',
+                        'question_id': qid,
+                        'option_index': option_index,
+                        'threshold': threshold
+                    })
+                logger.info(f"===== 最终 merged: {merged}")
+                logger.info(f"===== 最终 stop_conditions: {stop_conditions}")
+                questionnaire.stop_condition = stop_conditions
+                questionnaire.save()
+                # ========== 保存结束 ==========
 
                 messages.success(request, '问卷已保存为草稿！')
                 return redirect('questionnaire_list')
         else:
-            # 表单验证失败
-            messages.error(request, '表单验证失败，请检查填写内容')
+                from_template = request.GET.get('from_template')
+                template_id = request.GET.get('template_id')
+                initial = {}
+                question_formset = QuestionFormSet()  # 默认空表单集
+
+                if template_id:
+                    try:
+                        template = Questionnaire.objects.get(id=template_id, is_template=True)
+                        initial = {
+                            'title': f'副本：{template.title}',
+                            'description': template.description,
+                            'access_type': template.access_type,
+                            'targets': template.targets,  # 预填目标列表
+                        }
+                        # 预填问题
+                        questions = template.questions.all().order_by('order')
+                        question_formset = QuestionFormSet(queryset=questions)
+                    except Questionnaire.DoesNotExist:
+                        pass
+
+                form = QuestionnaireForm(initial=initial)
+                return render(request, 'questionnaire/create.html', {
+                    'form': form,
+                    'question_formset': question_formset,  # 必须传递，否则页面无问题
+                    'from_template': from_template,
+                    'template_id': template_id,
+                    'is_admin': request.user.is_admin,
+                })
     else:
         form = QuestionnaireForm()
-
-    return render(request, 'questionnaire/create.html', {
+        from_template = request.GET.get('from_template')
+        template_id = request.GET.get('template_id')  # 新增：从 URL 获取模板ID
+        initial_stop_condition = None
+        if template_id:
+            try:
+                template = Questionnaire.objects.get(id=template_id, is_template=True)
+                initial_stop_condition = template.stop_condition
+            except Questionnaire.DoesNotExist:
+                pass
+        return render(request, 'questionnaire/create.html', {
+            'form': form,
+            'from_template': from_template,
+            'template_id': template_id,
+            'initial_stop_condition': initial_stop_condition,
+            'is_admin': request.user.is_admin
+        })
+    '''return render(request, 'questionnaire/create.html', {
         'form': form,
         'is_admin': request.user.is_admin
-    })
+    })'''
 
 @login_required
 def edit_questionnaire(request, questionnaire_id):
@@ -241,6 +532,96 @@ def edit_questionnaire(request, questionnaire_id):
         if form.is_valid() and question_formset.is_valid():
             form.save()
             question_formset.save()
+            questionnaire = form.instance
+
+            # 获取问题列表，用于局部条件查找
+            questions_list = list(questionnaire.questions.all().order_by('order'))
+
+            # ========== 保存停止条件 ==========
+            global_conditions_json = request.POST.get('global_conditions_json', '[]')
+            try:
+                global_conditions = json.loads(global_conditions_json)
+            except:
+                global_conditions = []
+            logger.info(f"===== 接收到的 global_conditions_json: {global_conditions_json}")
+            logger.info(f"===== 解析后的 global_conditions: {global_conditions}")
+            local_conditions_json = request.POST.get('local_conditions_json', '[]')
+            try:
+                local_conditions = json.loads(local_conditions_json)
+            except:
+                local_conditions = []
+            logger.info(f"===== 接收到的 local_conditions_json: {local_conditions_json}")
+            logger.info(f"===== 解析后的 local_conditions: {local_conditions}")
+            # 获取问题列表（用于将全局条件的关键词转换为选项索引）
+            questions_list = list(questionnaire.questions.all().order_by('order'))
+            logger.info(f"===== 问题列表 ID: {[q.id for q in questions_list]}")
+            # 使用字典合并相同 (question_id, option_index) 的条件，存储最小阈值
+            merged = {}
+
+            # 处理全局条件（将关键词匹配到选项）
+            # 处理全局条件（遍历所有问题，为每个匹配关键词的选项生成条件）
+            for cond in global_conditions:
+                if cond.get('type') != 'global':
+                    continue
+                keyword = cond.get('keyword')
+                threshold = cond.get('threshold')
+                logger.info(f"===== 处理全局条件: keyword='{keyword}', threshold={threshold}")
+                if not keyword or not threshold:
+                    logger.warning("全局条件缺少关键词或阈值，跳过")
+                    continue
+                # 遍历所有问题，为每个匹配的选项生成条件
+                for target_question in questions_list:
+                    options = target_question.options
+                    option_index = None
+                    for i, opt in enumerate(options):
+                        if opt.strip().lower() == keyword.strip().lower():
+                            option_index = i
+                            logger.warning("全局条件缺少关键词或阈值，跳过")
+                            break
+                    if option_index is not None:
+                        key = (str(target_question.id), option_index)
+                        if key not in merged or threshold < merged[key]:
+                            merged[key] = threshold
+                            logger.info(f"===== 添加/更新 merged: key={key}, threshold={threshold}")
+                    else:
+                        logger.info(f"===== 问题 {target_question.id} 中没有匹配 '{keyword}' 的选项")
+            # 处理局部条件
+            # 处理局部条件
+            for cond in local_conditions:
+                if cond.get('type') != 'per_option':
+                    continue
+                option_index = cond.get('option_index')
+                threshold = cond.get('threshold')
+                if option_index is None or not threshold:
+                    continue
+                # 优先使用 question_id
+                qid = cond.get('question_id')
+                target_question = None
+                if qid:
+                    target_question = next((q for q in questions_list if str(q.id) == qid), None)
+                else:
+                    # 使用 question_index（1-based）查找
+                    q_idx = cond.get('question_index')
+                    if q_idx and 1 <= q_idx <= len(questions_list):
+                        target_question = questions_list[q_idx - 1]
+                if target_question:
+                    key = (str(target_question.id), option_index)
+                    if key not in merged or threshold < merged[key]:
+                        merged[key] = threshold
+
+            # 转换为最终列表
+            stop_conditions = []
+            for (qid, option_index), threshold in merged.items():
+                stop_conditions.append({
+                    'type': 'per_option',
+                    'question_id': qid,
+                    'option_index': option_index,
+                    'threshold': threshold
+                })
+            logger.info(f"===== 最终 merged: {merged}")
+            logger.info(f"===== 最终 stop_conditions: {stop_conditions}")
+            questionnaire.stop_condition = stop_conditions
+            questionnaire.save()
             messages.success(request, '问卷已保存！')
             return redirect('questionnaire_detail', questionnaire_id=questionnaire.id)
     else:
@@ -256,8 +637,13 @@ def edit_questionnaire(request, questionnaire_id):
 
 
 @login_required
+@never_cache
 def questionnaire_detail(request, questionnaire_id):
-    """问卷详情"""
+    # 强制关闭当前连接，下次数据库操作将使用新连接
+    from django.db import connection
+    connection.close()
+
+    # 获取问卷对象（此时已使用新连接）
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
 
     # 检查权限
@@ -265,17 +651,116 @@ def questionnaire_detail(request, questionnaire_id):
         messages.error(request, '没有权限查看此问卷')
         return redirect('questionnaire_list')
 
-    responses = Response.objects.filter(questionnaire=questionnaire)
-    questions = questionnaire.questions.all()
+    # 尝试从缓存获取动态数据（保持不变）
+    cache_key = get_detail_cache_key(questionnaire)
+    detail_data = cache.get(cache_key)
+    if detail_data is None:
+        has_available_qrcode = True
+        if questionnaire.enable_multi_qrcodes:
+            has_available_qrcode = questionnaire.qrcodes.filter(is_used=False).exists()
+        submit_count = questionnaire.submit_count
+        detail_data = {
+            'has_available_qrcode': has_available_qrcode,
+            'submit_count': submit_count,
+        }
+        cache.set(cache_key, detail_data, 60)
 
+    has_available_qrcode = detail_data['has_available_qrcode']
+    submit_count = detail_data['submit_count']
+
+    # ========== 使用原始 SQL 查询问题列表，彻底绕过 ORM 连接状态 ==========
+    from django.db import connection
+    with connection.cursor() as cursor:
+        cursor.execute("""
+                       SELECT id, text, question_type, options, required, max_length, `order`
+                       FROM questionnaire_question
+                       WHERE questionnaire_id = %s
+                       ORDER BY "order"
+                       """, [str(questionnaire_id)])
+        rows = cursor.fetchall()
+
+    # 将原始数据转换为 Question 对象列表（保持模板兼容）
+    from .models import Question
+    questions = []
+    for row in rows:
+        q = Question(
+            id=row[0],
+            text=row[1],
+            question_type=row[2],
+            options=row[3],
+            required=row[4],
+            max_length=row[5],
+            order=row[6],
+            questionnaire_id=questionnaire_id
+        )
+        q._state.adding = False  # 标记为已存在
+        questions.append(q)
+    # =================================================================
+
+    user_has_submitted = False
+    if request.user.is_authenticated:
+        user_has_submitted = Response.objects.filter(
+            questionnaire=questionnaire,
+            user=request.user,
+            is_submitted=True
+        ).exists()
+
+    responses = Response.objects.filter(questionnaire=questionnaire)
+    now = timezone.now()
+
+    # 调试输出（可选）
+    print("=== 详情视图调试 ===")
+    print(f"问卷ID: {questionnaire.id}")
+    print(f"问题数量: {len(questions)}")
+    print(f"has_available_qrcode: {has_available_qrcode}")
+
+    # 计算当前问卷版本的提交次数（包含匿名用户）
+    current_version_submit_count = Response.objects.filter(
+        questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True
+    ).count()
+
+    # 获取当前用户的最新提交版本和提交状态
+    user_has_submitted = False
+    latest_response_version = 0
+    if request.user.is_authenticated:
+        latest_response = Response.objects.filter(
+            questionnaire=questionnaire,
+            user=request.user,
+            is_submitted=True
+        ).order_by('-submitted_at').first()
+        if latest_response:
+            user_has_submitted = True
+            latest_response_version = latest_response.questionnaire_version
+            # 修正版本号 0 的问题
+            if latest_response_version == 0:
+                latest_response_version = 1
+
+    # 计算截止时间和当前时间的 ISO 字符串（供前端判断）
+    now = timezone.now()
+    end_time_iso = questionnaire.end_time.isoformat() if questionnaire.end_time else None
+    now_iso = now.isoformat()
+
+    # 返回模板，保留原有所有模板变量
     return render(request, 'questionnaire/detail.html', {
         'questionnaire': questionnaire,
         'responses': responses,
         'questions': questions,
         'response_count': responses.count(),
-        'is_admin': request.user.is_admin
+        'is_admin': request.user.is_superuser,
+        'has_available_qrcode': has_available_qrcode,
+        'submit_count': submit_count,
+        'user_has_submitted': user_has_submitted,
+        'now': now,
+        'now_iso': now_iso,
+        'closed_reason': questionnaire.closed_reason,  # 新增
+        'just_created': request.session.pop('just_created', None) == str(questionnaire_id),
+        'current_version_submit_count': current_version_submit_count,
+        'user_has_submitted': user_has_submitted,
+        'latest_response_version': latest_response_version,
+        'end_time_iso': end_time_iso,
     })
-
 
 @login_required
 def my_responses(request):
@@ -376,7 +861,71 @@ def make_user_admin(request, user_id):
     user.is_staff = True
     user.save()
 
-    messages.success(request, f'用户 {user.username} 已设为管理员')
+    try:
+        # 1. 发送通知给被设为管理员的用户
+        admin_notification_message = f"""
+           恭喜！您已被系统管理员 {request.user.username} 设为管理员。
+
+           您现在拥有以下权限：
+           - 查看系统统计信息
+           - 管理所有用户的问卷
+           - 查看所有问卷的回答
+           - 管理用户权限
+
+           请注意，只有原始管理员可以授予或取消管理员权限。
+
+           操作时间：{timezone.now().strftime('%Y年%m月%d日 %H:%M:%S')}
+           """
+
+        NotificationManager.send_admin_notification(
+            users=[user],
+            title="🎉 您已被设为管理员",
+            message=admin_notification_message.strip(),
+            priority='high'
+        )
+
+        # 2. 发送通知给所有其他管理员（除了操作者和被操作者）
+        other_admins = User.objects.filter(
+            is_superuser=True,
+            is_active=True
+        ).exclude(id__in=[request.user.id, user.id])
+
+        if other_admins.exists():
+            other_admins_message = f"""
+               管理员权限变更通知：
+
+               用户 {user.username} 已被 {request.user.username} 设为系统管理员。
+
+               现在系统中共有 {other_admins.count() + 2} 位管理员。
+
+               操作时间：{timezone.now().strftime('%Y年%m月%d日 %H:%M:%S')}
+               """
+
+            NotificationManager.send_admin_notification(
+                users=list(other_admins),
+                title="管理员权限变更",
+                message=other_admins_message.strip(),
+                priority='normal'
+            )
+
+        # 3. 发送系统通知给所有用户
+        all_users_message = f"用户 {user.username} 已被设为系统管理员，欢迎新管理员的加入！"
+        NotificationManager.send_system_notification_to_all(
+            title="新管理员加入",
+            message=all_users_message,
+            priority='normal',
+            exclude_users=[user, request.user]
+        )
+
+        messages.success(request, f'用户 {user.username} 已设为管理员，并已发送通知')
+
+    except Exception as e:
+        # 即使通知发送失败，也不影响权限设置
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"发送管理员权限变更通知失败: {e}")
+        messages.success(request, f'用户 {user.username} 已设为管理员（通知发送失败: {e}）')
+
     return redirect('manage_users')
 
 @login_required
@@ -389,15 +938,18 @@ def admin_statistics(request):
     published_questionnaires = Questionnaire.objects.filter(status='published').count()
     total_responses = Response.objects.count()
 
-    return render(request, 'admin/statistics.html', {
+    context = {
         'total_users': total_users,
         'new_users_today': new_users_today,
         'total_questionnaires': total_questionnaires,
         'published_questionnaires': published_questionnaires,
         'total_responses': total_responses,
-        'is_admin': True
-    })
-    '''logger.debug('==== admin_statistics 被调用 ====')
+        'is_admin': True,
+    }
+    return render(request, 'admin/statistics.html', context)
+
+
+'''logger.debug('==== admin_statistics 被调用 ====')
     logger.debug(f'用户: {request.user}  |  is_admin: {request.user.is_admin}')
     return HttpResponse('admin_statistics reached', content_type='text/plain')'''
 
@@ -435,10 +987,16 @@ def publish_questionnaire(request, questionnaire_id):
             questionnaire.invite_code = ''.join(secrets.choice(alphabet) for i in range(8))
 
         questionnaire.save()
+        clear_questionnaire_cache(questionnaire)
+        from .views_qrcode import generate_qrcode_for_questionnaire, generate_multi_qrcodes_for_questionnaire
+        if questionnaire.enable_multi_qrcodes:
+            generate_multi_qrcodes_for_questionnaire(request, questionnaire)
+        else:
+            generate_qrcode_for_questionnaire(request, questionnaire)
 
         # 生成二维码
         from .views_qrcode import generate_qrcode
-        return generate_qrcode(request, questionnaire.id)
+        return redirect('questionnaire_detail', questionnaire_id=questionnaire.id)
 
     except Exception as e:
         messages.error(request, f'发布失败: {str(e)}')
@@ -487,7 +1045,367 @@ def remove_user_admin(request, user_id):
 
     # 取消管理员权限
     user.is_superuser = False
+    user.is_staff = False
     user.save()
+    # ============ 添加通知功能 ============
+    try:
+        # 1. 发送通知给被取消管理员权限的用户
+        removed_notification_message = f"""
+            通知：您的管理员权限已被取消
 
-    messages.success(request, f'用户 {user.username} 已取消管理员权限')
+            系统管理员 {request.user.username} 已取消您的管理员权限。
+
+            您将不再拥有以下权限：
+            - 查看系统统计信息
+            - 管理其他用户的问卷
+            - 管理用户权限
+
+            如果您对此有疑问，请联系系统管理员。
+
+            操作时间：{timezone.now().strftime('%Y年%m月%d日 %H:%M:%S')}
+            """
+
+        NotificationManager.send_admin_notification(
+            users=[user],
+            title="管理员权限变更通知",
+            message=removed_notification_message.strip(),
+            priority='high'
+        )
+
+        # 2. 发送通知给所有其他管理员（除了操作者）
+        other_admins = User.objects.filter(
+            is_superuser=True,
+            is_active=True
+        ).exclude(id=request.user.id)
+
+        if other_admins.exists():
+            other_admins_message = f"""
+                管理员权限变更通知：
+
+                用户 {user.username} 的管理员权限已被 {request.user.username} 取消。
+
+                现在系统中共有 {other_admins.count()} 位管理员。
+
+                操作时间：{timezone.now().strftime('%Y年%m月%d日 %H:%M:%S')}
+                """
+
+            NotificationManager.send_admin_notification(
+                users=list(other_admins),
+                title="管理员权限变更",
+                message=other_admins_message.strip(),
+                priority='normal'
+            )
+
+        messages.success(request, f'用户 {user.username} 已取消管理员权限，并已发送通知')
+
+    except Exception as e:
+        # 即使通知发送失败，也不影响权限取消
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"发送管理员权限取消通知失败: {e}")
+        messages.success(request, f'用户 {user.username} 已取消管理员权限（通知发送失败: {e}）')
+
     return redirect('manage_users')
+
+@login_required
+def user_profile(request):
+    """用户个人资料页面"""
+    user = request.user
+
+    if request.method == 'POST':
+        try:
+            # 获取表单数据
+            username = request.POST.get('username', '').strip()
+            first_name = request.POST.get('first_name', '').strip()
+            last_name = request.POST.get('last_name', '').strip()
+            phone = request.POST.get('phone', '').strip()
+
+            # 检查用户名是否更改
+            if username != user.username:
+                # 检查用户名是否已存在
+                if User.objects.filter(username=username).exists():
+                    # 生成推荐用户名
+                    import random
+                    import string
+                    recommendations = []
+
+                    # 方法1: 在原用户名后加随机数字
+                    for i in range(3):
+                        suggested = f"{username}{random.randint(100, 999)}"
+                        if not User.objects.filter(username=suggested).exists():
+                            recommendations.append(suggested)
+
+                    # 方法2: 在原用户名后加随机字母
+                    if len(recommendations) < 3:
+                        for i in range(3 - len(recommendations)):
+                            suggested = f"{username}{random.choice(string.ascii_lowercase)}{random.choice(string.ascii_lowercase)}"
+                            if not User.objects.filter(username=suggested).exists():
+                                recommendations.append(suggested)
+
+                    # 方法3: 如果还是不够，用更简单的
+                    if len(recommendations) < 3:
+                        for i in range(3 - len(recommendations)):
+                            suggested = f"{username}_{i + 1}"
+                            if not User.objects.filter(username=suggested).exists():
+                                recommendations.append(suggested)
+
+                    # 准备错误消息
+                    error_msg = f'用户名 "{username}" 已被使用，请换一个用户名。'
+                    if recommendations:
+                        error_msg += f' 推荐：{", ".join(recommendations[:3])}'
+
+                    messages.error(request, error_msg)
+                    return render(request, 'dashboard/profile.html', {
+                        'user': user,
+                        'is_admin': user.is_admin,
+                        'unread_notifications_count': user.notifications.filter(is_read=False).count()
+                    })
+
+                # 更新用户名
+                user.username = username
+
+            # 更新其他信息
+            user.first_name = first_name
+            user.last_name = last_name
+            user.phone = phone
+            user.save()
+
+            messages.success(request, '个人资料已更新')
+            return redirect('user_profile')
+
+        except Exception as e:
+            logger.error(f"更新用户资料失败: {e}")
+            messages.error(request, '更新失败，请稍后重试')
+
+    # 计算未读通知数量
+    unread_notifications_count = user.notifications.filter(is_read=False).count()
+
+    return render(request, 'dashboard/profile.html', {
+        'user': user,
+        'is_admin': user.is_admin,
+        'unread_notifications_count': unread_notifications_count
+    })
+
+
+@login_required
+def check_username_availability(request):
+    """检查用户名是否可用"""
+    username = request.GET.get('username', '').strip()
+    current_username = request.user.username
+
+    if not username:
+        return JsonResponse({
+            'available': False,
+            'message': '用户名不能为空'
+        })
+
+    if username == current_username:
+        return JsonResponse({
+            'available': True,
+            'message': '这是您当前使用的用户名'
+        })
+
+    if len(username) < 3:
+        return JsonResponse({
+            'available': False,
+            'message': '用户名长度不能少于3个字符'
+        })
+
+    # 检查用户名是否已存在
+    if User.objects.filter(username=username).exists():
+        # 生成推荐用户名
+        import random
+        import string
+        recommendations = []
+
+        # 尝试生成3个推荐
+        for i in range(3):
+            # 方法1: 加数字
+            suggested = f"{username}{random.randint(100, 999)}"
+            if not User.objects.filter(username=suggested).exists():
+                recommendations.append(suggested)
+
+        if len(recommendations) < 3:
+            for i in range(3 - len(recommendations)):
+                # 方法2: 加字母
+                suggested = f"{username}{random.choice(string.ascii_lowercase)}{random.choice(string.ascii_lowercase)}"
+                if not User.objects.filter(username=suggested).exists():
+                    recommendations.append(suggested)
+
+        if len(recommendations) < 3:
+            for i in range(3 - len(recommendations)):
+                # 方法3: 加下划线
+                suggested = f"{username}_{i + 1}"
+                if not User.objects.filter(username=suggested).exists():
+                    recommendations.append(suggested)
+
+        return JsonResponse({
+            'available': False,
+            'message': '用户名已被使用',
+            'recommendations': recommendations[:3]
+        })
+
+    return JsonResponse({
+        'available': True,
+        'message': '用户名可用'
+    })
+
+@login_required
+@require_POST
+def update_questionnaire_time(request, questionnaire_id):
+    """更新问卷的开始和截止时间（AJAX 用）"""
+    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
+    # 权限检查
+    if not (request.user == questionnaire.creator or request.user.is_admin):
+        return JsonResponse({'success': False, 'message': '没有权限'}, status=403)
+
+    start_time = request.POST.get('start_time')
+    end_time = request.POST.get('end_time')
+    # 空字符串转为 None
+    start_time = start_time if start_time else None
+    end_time = end_time if end_time else None
+
+    if start_time and end_time and end_time <= start_time:
+        return JsonResponse({'success': False, 'message': '截止时间必须晚于开始时间'})
+
+    try:
+        questionnaire.start_time = start_time
+        questionnaire.end_time = end_time
+        questionnaire.save()
+        return JsonResponse({'success': True, 'message': '时间设置已更新'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': f'更新失败: {str(e)}'})
+
+
+@login_required
+@require_POST
+def update_questionnaire_limit(request, questionnaire_id):
+    """更新问卷的提交份数限制（AJAX 用）"""
+    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
+    if not (request.user == questionnaire.creator or request.user.is_admin):
+        return JsonResponse({'success': False, 'message': '没有权限'}, status=403)
+
+    limit_responses = request.POST.get('limit_responses') == 'on'
+    max_responses = request.POST.get('max_responses')
+
+    if limit_responses and not max_responses:
+        return JsonResponse({'success': False, 'message': '开启份数限制时必须填写最大份数'})
+
+    if max_responses:
+        try:
+            max_responses = int(max_responses)
+            if max_responses <= 0:
+                raise ValueError
+        except ValueError:
+            return JsonResponse({'success': False, 'message': '最大份数必须为正整数'})
+    else:
+        max_responses = None
+
+    try:
+        questionnaire.limit_responses = limit_responses
+        questionnaire.max_responses = max_responses
+        questionnaire.save()
+        return JsonResponse({'success': True, 'message': '份数限制已更新'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': f'更新失败: {str(e)}'})
+
+
+@require_GET
+def api_questionnaire_detail(request, questionnaire_id):
+    """返回问卷的最新动态数据（用于 AJAX 更新）"""
+    # 强制关闭当前连接，确保后续查询使用新连接
+    connection.close()
+
+    # 直接使用原始 SQL 获取问卷基本信息（避免 ORM 缓存）
+    with connection.cursor() as cursor:
+        cursor.execute("""
+                       SELECT id,
+                              title,
+                              description,
+                              status,
+                              version,
+                              access_type,
+                              invite_code,
+                              limit_responses,
+                              max_responses,
+                              enable_multi_qrcodes,
+                              submit_count,
+                              creator_id
+                       FROM questionnaire_questionnaire
+                       WHERE id = %s
+                       """, [str(questionnaire_id)])
+        row = cursor.fetchone()
+        if not row:
+            return JsonResponse({'error': '问卷不存在'}, status=404)
+
+        # 构造 questionnaire 对象（仅用于后续非关键查询，或者也可以不用）
+        # 但我们仍然需要 creator_id 用于权限检查
+        creator_id = row[11]
+
+    # 权限检查（需要用户对象，这里用 ORM 查询用户，但这是独立查询，不受影响）
+    questionnaire = Questionnaire.objects.get(pk=questionnaire_id)
+    if not request.user.is_admin and questionnaire.creator != request.user:
+        return JsonResponse({'error': '无权限'}, status=403)
+
+    # ========== 使用原始 SQL 查询问题列表，彻底绕过任何连接状态 ==========
+    with connection.cursor() as cursor:
+        cursor.execute("""
+                       SELECT id, text, question_type, options, required, max_length, `order`
+                       FROM questionnaire_question
+                       WHERE questionnaire_id = %s
+                       ORDER BY "order"
+                       """, [str(questionnaire_id)])
+        rows = cursor.fetchall()
+
+    questions = []
+    for row in rows:
+        # 解析 options 字段（假设存储为 JSON 字符串）
+        options = row[3]
+        if isinstance(options, str):
+            try:
+                options = json.loads(options)
+            except:
+                options = []
+        questions.append({
+            'id': row[0],
+            'text': row[1],
+            'question_type': row[2],
+            'options': options,
+            'required': row[4],
+            'max_length': row[5],
+            'order': row[6],
+        })
+    # =================================================================
+
+    # 以下使用 ORM 查询无妨（它们是独立查询，不依赖主查询连接）
+    has_available_qrcode = True
+    if questionnaire.enable_multi_qrcodes:
+        has_available_qrcode = questionnaire.qrcodes.filter(is_used=False).exists()
+
+    submit_count = questionnaire.submit_count
+
+    user_has_submitted = False
+    if request.user.is_authenticated:
+        user_has_submitted = Response.objects.filter(
+            questionnaire=questionnaire,
+            user=request.user,
+            is_submitted=True
+        ).exists()
+
+    return JsonResponse({
+        'success': True,
+        'questions': questions,
+        'has_available_qrcode': has_available_qrcode,
+        'submit_count': submit_count,
+        'user_has_submitted': user_has_submitted,
+        'questionnaire_version': questionnaire.version,
+        'status': questionnaire.status,
+    })
+
+@login_required
+def questionnaire_redirect_wait(request, questionnaire_id):
+    redirect_url = reverse('questionnaire_detail', args=[questionnaire_id]) + f'?_={int(timezone.now().timestamp())}'
+    return render(request, 'questionnaire/redirect_wait.html', {
+        'redirect_url': redirect_url,
+        'questionnaire_id': str(questionnaire_id)   # 新增传递问卷ID
+    })

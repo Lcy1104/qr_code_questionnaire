@@ -114,28 +114,36 @@
             {{ questionnaire.description|default:"请登录后填写此问卷" }}
         </p>
 
-        {% if user_is_authenticated %}
-        <!-- 已登录用户：显示“开始填写”按钮 -->
-        <a href="{{ start_url }}" class="login-btn" style="background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);">
-            开始填写问卷(使用当前账户）
-        </a>
-        <a href="{{ anonymous_url }}" class="login-btn" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%);">
-            匿名填写（不记录账号）
-        </a>
-    {% else %}
-        <!-- 未登录用户：显示登录、注册、匿名按钮 -->
-        <a href="{{ login_url }}" class="login-btn">
-            登录并填写问卷
-        </a>
+{% if stop_condition_closed %}
+            <div class="alert-danger">
+                <i class="fas fa-ban me-2"></i> {{ stop_reason }}
+            </div>
+        {% else %}
+            <!-- ========== 原有按钮区域（未关闭时才显示） ========== -->
+            {% if user_is_authenticated %}
+                <!-- 已登录用户：显示“开始填写”按钮 -->
+                <a href="{{ start_url }}" class="login-btn" style="background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);">
+                    开始填写问卷(使用当前账户）
+                </a>
 
-        <a href="{{ register_url }}" class="login-btn" style="background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%); margin-bottom: 15px;">
-            注册新账号
-        </a>
+                <a href="{{ anonymous_url }}" class="login-btn" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%);">
+                    匿名填写（不记录账号）
+                </a>
+            {% else %}
+                <!-- 未登录用户：显示登录、注册、匿名按钮 -->
+                <a href="{{ login_url }}" class="login-btn">
+                    登录并填写问卷
+                </a>
 
-        <a href="{{ anonymous_url }}" class="login-btn" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%);">
-            直接匿名填写（无需登录）
-        </a>
-    {% endif %}
+                <a href="{{ register_url }}" class="login-btn" style="background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%); margin-bottom: 15px;">
+                    注册新账号
+                </a>
+
+                <a href="{{ anonymous_url }}" class="login-btn" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%);">
+                    直接匿名填写（无需登录）
+                </a>
+            {% endif %}
+        {% endif %}
         
         <div class="instructions">
             <h3>填写说明：</h3>

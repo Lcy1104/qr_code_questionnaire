@@ -361,6 +361,13 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
     </div>
 </div>
 {% endif %}
+                    {% if questionnaire.status == 'closed' and questionnaire.closed_reason %}
+<div class="alert alert-warning mt-3">
+    <i class="fas fa-exclamation-triangle me-2"></i>
+    <strong>问卷已关闭：</strong> {{ questionnaire.closed_reason }}
+</div>
+{% endif %}
+
                         <p><strong>问卷状态:</strong>
                             <span class="badge {% if questionnaire.status == 'published' %}bg-success{% elif questionnaire.status == 'draft' %}bg-warning{% else %}bg-secondary{% endif %}">
                                 {{ questionnaire.get_status_display }}
@@ -1351,9 +1358,10 @@ function updateQuestionsUI(questions) {
     html += `<h6 class="mb-1">${index + 1}. ${q.text}</h6>`;
     html += `<div class="d-flex align-items-center">`;
     html += `<small class="text-muted me-3">${getQuestionTypeDisplay(q.question_type)}</small>`;
-    if (q.answer_items.count > 0) {
-        html += `<span class="badge bg-warning me-2" title="此问题已有回答记录">${q.answer_set.count} 个回答</span>`;
-    }
+    // 安全地处理可能不存在的 answer_items 和 answer_set
+if (q.answer_items && q.answer_items.count > 0) {
+    html += `<span class="badge bg-warning me-2" title="此问题已有回答记录">${q.answer_set ? q.answer_set.count : '?'} 个回答</span>`;
+}
     html += `<a href="/question/${q.id}/versions/" class="btn btn-sm btn-outline-info" title="查看版本历史"><i class="fas fa-history"></i></a>`;
     html += `</div></div>`;
 
