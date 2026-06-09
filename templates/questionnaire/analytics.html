@@ -188,7 +188,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for response in responses|slice:":20" %}
+                                    {% for response in responses %}
                                     <tr>
                                         <td>{{ forloop.counter }}</td>
                                         <td>{% if response.user %}{{ response.user.username }}{% else %}匿名用户{% endif %}</td>
@@ -426,9 +426,9 @@
 
                     allQuestionCharts.push({ id: q.id, charts: [barChart, pieChart] });
                     if (q.other_answers && q.other_answers.length > 0) {
-                        var otherHtml = '<h6 class="mt-3">其他选项补充内容</h6><div class="answer-table"><table class="table table-sm table-striped"><thead><tr><th>用户</th><th>内容</th></tr></thead><tbody>';
-                        q.other_answers.forEach(item => {
-                            otherHtml += `<tr><td>${item.user}</td><td>${item.answer}</td></tr>`;
+                        var otherHtml = '<h6 class="mt-3">其他选项补充内容</h6><div class="answer-table"><table class="table table-sm table-striped"><thead><tr><th>#</th><th>用户</th><th>内容</th></tr></thead><tbody>';
+                        q.other_answers.forEach((item, answerIndex) => {
+                            otherHtml += `<tr><td>${answerIndex + 1}</td><td>${item.user}</td><td>${item.answer}</td></tr>`;
                         });
                         otherHtml += '</tbody></table></div>';
                         document.getElementById(`question-${q.id}-other`).innerHTML = otherHtml;
@@ -436,16 +436,13 @@
 
                 } else if (q.type === 'text') {
                     // 简答题：表格展示用户和答案
-                    var listHtml = '<div class="answer-table"><table class="table table-sm table-striped"><thead><tr><th>用户</th><th>答案</th></tr></thead><tbody>';
+                    var listHtml = '<div class="answer-table"><table class="table table-sm table-striped"><thead><tr><th>#</th><th>用户</th><th>答案</th></tr></thead><tbody>';
                     if (q.answers && q.answers.length > 0) {
-                        q.answers.slice(0, 20).forEach(item => {
-                            listHtml += `<tr><td>${item.user}</td><td>${item.answer}</td></tr>`;
+                        q.answers.forEach((item, answerIndex) => {
+                            listHtml += `<tr><td>${answerIndex + 1}</td><td>${item.user}</td><td>${item.answer}</td></tr>`;
                         });
-                        if (q.answers.length > 20) {
-                            listHtml += `<tr><td colspan="2" class="text-muted">... 还有 ${q.answers.length - 20} 条回答未显示</td></tr>`;
-                        }
                     } else {
-                        listHtml += `<tr><td colspan="2" class="text-center">暂无回答</td></tr>`;
+                        listHtml += `<tr><td colspan="3" class="text-center">暂无回答</td></tr>`;
                     }
                     listHtml += '</tbody></table></div>';
                     container.innerHTML = listHtml;
