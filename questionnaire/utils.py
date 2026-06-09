@@ -51,6 +51,41 @@ def detect_browser(user_agent):
     else:
         return 'browser'
 
+
+def question_is_visible(questionnaire, question, post_data):
+    """Return whether a conditional question should participate in this submission."""
+    parent_order = getattr(question, 'conditional_parent_order', None)
+    trigger_options = getattr(question, 'conditional_options', None) or []
+    if not parent_order or not trigger_options:
+        return True
+
+    try:
+        parent = questionnaire.questions.get(order=parent_order)
+    except Exception:
+        return False
+
+    key = f'question_{parent.id}'
+    selected_texts = []
+    if parent.question_type == 'checkbox':
+        raw_values = post_data.getlist(key) if hasattr(post_data, 'getlist') else []
+    else:
+        raw = post_data.get(key, '')
+        raw_values = [raw] if raw != '' else []
+
+    for raw in raw_values:
+        if parent.question_type in ['radio', 'checkbox']:
+            try:
+                idx = int(raw)
+                if 0 <= idx < len(parent.options):
+                    selected_texts.append(str(parent.options[idx]).strip())
+            except (TypeError, ValueError):
+                continue
+        else:
+            selected_texts.append(str(raw).strip())
+
+    trigger_set = {str(opt).strip() for opt in trigger_options if str(opt).strip()}
+    return any(text in trigger_set for text in selected_texts)
+
 def pie_base64(labels, sizes):
     """临时饼图 → base64，先保证不报错"""
     if not labels or not sizes:

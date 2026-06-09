@@ -201,7 +201,10 @@ def qrcode_access(request, qr_code_id):
 
         # 如果二维码已完成全部评价，拒绝访问
         if qrcode.is_used:
-            return render(request, 'error.html', {'message': '该二维码已完成全部评价'})
+            return render(request, 'questionnaire/not_available.html', {
+                'questionnaire': questionnaire,
+                'reason': '该二维码已被使用，无法再次填写'
+            })
 
         # 获取当前用户标识
         if request.user.is_authenticated:
@@ -223,9 +226,15 @@ def qrcode_access(request, qr_code_id):
         else:
             # 校验身份
             if qrcode.bound_user and qrcode.bound_user != current_user:
-                return render(request, 'error.html', {'message': '此二维码已被其他用户绑定，无法使用'})
+                return render(request, 'questionnaire/not_available.html', {
+                    'questionnaire': questionnaire,
+                    'reason': '此二维码已被其他用户绑定，无法使用'
+                })
             if qrcode.bound_fingerprint and qrcode.bound_fingerprint != current_fingerprint:
-                return render(request, 'error.html', {'message': '此二维码已被其他设备绑定，无法使用'})
+                return render(request, 'questionnaire/not_available.html', {
+                    'questionnaire': questionnaire,
+                    'reason': '此二维码已被其他设备绑定，无法使用'
+                })
 
         # 标记为已分享（如果尚未），确保普通提交不会抢走
         if not qrcode.is_shared:

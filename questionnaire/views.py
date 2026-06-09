@@ -1,6 +1,6 @@
 from .models import Questionnaire, Response,QuestionnaireQRCode
 from .visualization import get_questionnaire_stats, build_stats
-from .forms import QuestionnaireForm, QuestionForm, QuestionFormSet, SelectTargetForm
+from .forms import QuestionnaireForm, QuestionForm, QuestionFormSet, SelectTargetForm, split_options_text
 from django.utils import timezone
 from django.views.generic import ListView
 from django.shortcuts import render, redirect, get_object_or_404, reverse
@@ -12,6 +12,7 @@ from .version_manager import VersionManager
 from .notification_manager import NotificationManager
 from .views_qrcode import generate_qrcode_for_questionnaire, generate_multi_qrcodes_for_questionnaire
 from django.http import JsonResponse
+from django.db import transaction
 from django.db.models import Avg, Count
 from django.utils import timezone
 from datetime import timedelta
@@ -93,7 +94,12 @@ def survey_form(request, questionnaire_id):
         return redirect('questionnaire_detail', questionnaire_id=questionnaire.id)
 
     # 检查是否已经提交过
-    if Response.objects.filter(questionnaire=questionnaire, user=request.user).exists():
+    if Response.objects.filter(
+        questionnaire=questionnaire,
+        user=request.user,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True
+    ).exists():
         messages.warning(request, '您已经提交过此问卷')
         return render(request, 'questionnaire/already_submitted.html', {'questionnaire': questionnaire})
 
@@ -121,16 +127,17 @@ def survey_form(request, questionnaire_id):
     questions = questionnaire.questions.all().order_by('order')
 
     # 增加访问计数（只在首次进入时增加）
-    if 'questionnaire_viewed' not in request.session or request.session['questionnaire_viewed'] != str(
-            questionnaire.id):
+    viewed_key = f'{questionnaire.id}:v{questionnaire.version}'
+    if request.session.get('questionnaire_viewed') != viewed_key:
         questionnaire.view_count += 1
         questionnaire.save()
-        request.session['questionnaire_viewed'] = str(questionnaire.id)
+        request.session['questionnaire_viewed'] = viewed_key
 
     return render(request, 'questionnaire/form.html', {
         'questionnaire': questionnaire,
         'questions': questions,
         'now': timezone.now(),
+        'survey_start_time': timezone.now().isoformat(),
     })
 
 def select_target(request, questionnaire_id):
@@ -142,6 +149,25 @@ def select_target(request, questionnaire_id):
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status__in=['published', 'modified'])
 
     is_anonymous = request.GET.get('anonymous') == '1' or request.POST.get('anonymous') == '1'
+    can_access, reason = questionnaire.can_be_accessed_by(
+        user=request.user if not is_anonymous else None,
+        invite_code=request.session.get('valid_invite_code')
+    )
+    if not can_access:
+        return render(request, 'questionnaire/not_available.html', {
+            'questionnaire': questionnaire,
+            'reason': reason,
+        })
+    current_submit_count = Response.objects.filter(
+        questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True,
+    ).count()
+    if questionnaire.limit_responses and questionnaire.max_responses is not None and current_submit_count >= questionnaire.max_responses:
+        return render(request, 'questionnaire/not_available.html', {
+            'questionnaire': questionnaire,
+            'reason': '问卷已达到收集上限',
+        })
 
     if questionnaire.access_type == 'invite':
         from .views_invite_first import check_invite_session
@@ -179,6 +205,25 @@ def answer_questions(request, questionnaire_id):
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status__in=['published', 'modified'])
 
     is_anonymous = request.GET.get('anonymous') == '1' or request.POST.get('anonymous') == '1'
+    can_access, reason = questionnaire.can_be_accessed_by(
+        user=request.user if not is_anonymous else None,
+        invite_code=request.session.get('valid_invite_code')
+    )
+    if not can_access:
+        return render(request, 'questionnaire/not_available.html', {
+            'questionnaire': questionnaire,
+            'reason': reason,
+        })
+    current_submit_count = Response.objects.filter(
+        questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True,
+    ).count()
+    if questionnaire.limit_responses and questionnaire.max_responses is not None and current_submit_count >= questionnaire.max_responses:
+        return render(request, 'questionnaire/not_available.html', {
+            'questionnaire': questionnaire,
+            'reason': '问卷已达到收集上限',
+        })
 
     # 检查是否需要先选择目标（有目标且无 session 目标时重定向）
     if questionnaire.targets and 'selected_target' not in request.session:
@@ -196,6 +241,8 @@ def answer_questions(request, questionnaire_id):
             'questions': questions,
             'target': target,
             'is_anonymous': is_anonymous,
+            'active_qrcode_id': request.session.get('active_qrcode_id'),
+            'survey_start_time': timezone.now().isoformat(),
         })
 
         # POST 请求：提交答卷
@@ -434,10 +481,10 @@ def edit_questionnaire(request, questionnaire_id):
         Questionnaire,
         Question,
         form=QuestionForm,
-        exclude=('max_length',),
+        exclude=('max_length', 'conditional_parent_order', 'conditional_options'),
         extra=0,  # 编辑页面不添加空白表单
         can_delete=True,
-        max_num=20,
+        max_num=200,
     )
 
     if request.method == 'POST':
@@ -468,7 +515,7 @@ def edit_questionnaire(request, questionnaire_id):
         if 'questions-MIN_NUM_FORMS' not in mutable_post:
             mutable_post['questions-MIN_NUM_FORMS'] = '0'
         if 'questions-MAX_NUM_FORMS' not in mutable_post:
-            mutable_post['questions-MAX_NUM_FORMS'] = '20'
+            mutable_post['questions-MAX_NUM_FORMS'] = '200'
 
         logger.info(f"[EDIT POST] 修复后管理表单: TOTAL_FORMS={mutable_post.get('questions-TOTAL_FORMS')}")
 
@@ -482,7 +529,7 @@ def edit_questionnaire(request, questionnaire_id):
 
             if question_type in ['radio', 'checkbox']:
                 # 按行分割并去除空行
-                options = [opt.strip() for opt in options_text.split('\n') if opt.strip()]
+                options = split_options_text(options_text)
                 if not options:
                     # 如果选项为空，设置为默认选项
                     options = ['选项1', '选项2']
@@ -501,52 +548,10 @@ def edit_questionnaire(request, questionnaire_id):
         # 重新创建formset
         question_formset = EditableQuestionFormSet(mutable_post, instance=questionnaire)
 
-        # 验证表单
-        if form.is_valid() and question_formset.is_valid():
-            logger.info("[EDIT POST] 表单验证通过")
-
-            # 打印验证后的数据
-            for i, qform in enumerate(question_formset.forms):
-                if qform.is_valid():
-                    logger.info(f"[EDIT POST] 问题 {i} 验证通过: text={qform.cleaned_data.get('text')!r}")
-                    logger.info(f"[EDIT POST] 问题 {i} options_text={qform.cleaned_data.get('options_text')!r}")
-                    logger.info(f"[EDIT POST] 问题 {i} options={qform.cleaned_data.get('options')!r}")
-                    logger.info(f"[EDIT POST] 问题 {i} instance.pk={qform.instance.pk}")
-                else:
-                    logger.error(f"[EDIT POST] 问题 {i} 验证失败: {qform.errors}")
-
-            # 检查是否有任何修改
-            has_modifications = False
-
-            # 1. 检查问卷基本信息是否修改
-            for field in ['title', 'description', 'access_type']:
-                if form.has_changed() and field in form.changed_data:
-                    has_modifications = True
-                    logger.info(f"[EDIT] 问卷基本信息已修改: {field}")
-                    break
-
-            # 2. 检查问题是否修改
-            for i, qform in enumerate(question_formset.forms):
-                if qform.is_valid():
-                    # 检查是否需要删除
-                    if qform.cleaned_data.get('DELETE'):
-                        if qform.instance.pk:
-                            has_modifications = True
-                            qform.instance.delete()
-                            logger.info(f"[EDIT] 删除问题: {qform.instance.id}")
-                        continue
-
-                    # 检查是否是新问题或修改的问题
-                    if qform.instance.pk:
-                        # 已有问题：检查是否被修改
-                        if qform.has_changed():
-                            has_modifications = True
-                            logger.info(f"[EDIT] 修改问题: {qform.instance.id}")
-                    else:
-                        # 新添加的问题
-                        if qform.cleaned_data.get('text'):  # 确保不是空表单
-                            has_modifications = True
-                            logger.info(f"[EDIT] 添加新问题")
+        # 只校验问卷主表单。问题保存由下方手动逻辑按 id/order 处理，避免 inline formset 的 order 唯一性校验误拦截大量题目。
+        if form.is_valid():
+            logger.info("[EDIT POST] 问卷主表单验证通过，问题将手动保存")
+            has_modifications = form.has_changed() or True
 
             # 保存问卷基本信息
             questionnaire = form.save(commit=False)
@@ -556,6 +561,8 @@ def edit_questionnaire(request, questionnaire_id):
             # 关键：只有有修改时才更新版本号
             if has_modifications:
                 questionnaire.version += 1
+                questionnaire.view_count = 0
+                questionnaire.submit_count = 0
                 logger.info(f"[EDIT] 问卷有修改，版本号更新为: {questionnaire.version}")
             else:
                 logger.info(f"[EDIT] 问卷无修改，版本号保持不变: {questionnaire.version}")
@@ -606,11 +613,19 @@ def edit_questionnaire(request, questionnaire_id):
                     question_id = request.POST.get(f'questions-{i}-id', '').strip()
                     text = request.POST.get(f'questions-{i}-text', '').strip()
                     question_type = request.POST.get(f'questions-{i}-question_type', 'radio')
-                    order = request.POST.get(f'questions-{i}-order', str(i))
+                    order = request.POST.get(f'questions-{i}-order', str(i + 1))
+                    order_int = int(order) if order.isdigit() else i + 1
                     required = request.POST.get(f'questions-{i}-required') == 'on'
                     options_text = request.POST.get(f'questions-{i}-options_text', '')
                     max_length_field = request.POST.get(f'questions-{i}-max_length_field', '0')
+                    max_choices_field = request.POST.get(f'questions-{i}-max_choices_field', '0')
+                    conditional_parent_order_raw = request.POST.get(f'questions-{i}-conditional_parent_order', '').strip()
+                    conditional_options_text = request.POST.get(f'questions-{i}-conditional_options', '').strip()
                     delete_flag = request.POST.get(f'questions-{i}-DELETE', '')
+                    conditional_parent_order = None
+                    if conditional_parent_order_raw.isdigit() and int(conditional_parent_order_raw) > 0:
+                        conditional_parent_order = int(conditional_parent_order_raw)
+                    conditional_options = [opt.strip() for opt in conditional_options_text.split('\n') if opt.strip()]
 
                     logger.info(
                         f"[EDIT SAVE] 问题 {i} 原始数据: id={question_id}, text={text!r}, type={question_type}, delete={delete_flag}")
@@ -640,12 +655,14 @@ def edit_questionnaire(request, questionnaire_id):
                             # 更新字段
                             question.text = text
                             question.question_type = question_type
-                            question.order = int(order) if order.isdigit() else i
+                            question.order = order_int
                             question.required = required
+                            question.conditional_parent_order = conditional_parent_order
+                            question.conditional_options = conditional_options
 
                             # 处理选项
                             if question_type in ['radio', 'checkbox']:
-                                options = [opt.strip() for opt in options_text.split('\n') if opt.strip()]
+                                options = split_options_text(options_text)
                                 question.options = options if options else ['选项1', '选项2']
                                 logger.info(f"[EDIT SAVE] 问题 {i} 选项: {question.options}")
                             else:
@@ -653,6 +670,7 @@ def edit_questionnaire(request, questionnaire_id):
 
                             # 设置 max_length
                             question.max_length = int(max_length_field) if max_length_field.isdigit() else 0
+                            question.max_choices = int(max_choices_field) if max_choices_field.isdigit() else 0
                             logger.info(f"[EDIT SAVE] 问题 {i} max_length 设置为: {question.max_length}")
                             question.save()
                             logger.info(f"[EDIT SAVE] 已有问题保存成功: ID={question.id}")
@@ -662,7 +680,26 @@ def edit_questionnaire(request, questionnaire_id):
                             # 作为新问题创建
                             question_id = ''
 
-                    if not question_id:  # 新问题
+                    if not question_id:  # 新问题，或前端缺失 id 时按排序复用已有问题
+                        question = Question.objects.filter(questionnaire=questionnaire, order=order_int).first()
+                        if question:
+                            logger.info(f"[EDIT SAVE] 前端缺失ID，按排序更新已有问题: order={order_int}, ID={question.id}")
+                            question.text = text
+                            question.question_type = question_type
+                            question.required = required
+                            question.conditional_parent_order = conditional_parent_order
+                            question.conditional_options = conditional_options
+                            question.order = order_int
+                            if question_type in ['radio', 'checkbox']:
+                                options = split_options_text(options_text)
+                                question.options = options if options else ['选项1', '选项2']
+                            else:
+                                question.options = []
+                            question.max_length = int(max_length_field) if max_length_field.isdigit() else 0
+                            question.max_choices = int(max_choices_field) if max_choices_field.isdigit() else 0
+                            question.save()
+                            continue
+
                         logger.info(f"[EDIT SAVE] 创建新问题 {i}: text={text!r}")
 
                         # 创建新问题
@@ -670,13 +707,15 @@ def edit_questionnaire(request, questionnaire_id):
                             questionnaire=questionnaire,
                             text=text,
                             question_type=question_type,
-                            order=int(order) if order.isdigit() else i,
+                            order=order_int,
                             required=required,
+                            conditional_parent_order=conditional_parent_order,
+                            conditional_options=conditional_options,
                         )
 
                         # 处理选项
                         if question_type in ['radio', 'checkbox']:
-                            options = [opt.strip() for opt in options_text.split('\n') if opt.strip()]
+                            options = split_options_text(options_text)
                             question.options = options if options else ['选项1', '选项2']
                             logger.info(f"[EDIT SAVE] 新问题 {i} 选项: {question.options}")
                         else:
@@ -684,6 +723,7 @@ def edit_questionnaire(request, questionnaire_id):
 
                         # 设置 max_length
                         question.max_length = int(max_length_field) if max_length_field.isdigit() else 0
+                        question.max_choices = int(max_choices_field) if max_choices_field.isdigit() else 0
 
                         # 保存新问题
                         question.save()
@@ -927,7 +967,7 @@ def survey_access(request, questionnaire_id=None, invite_code=None):
 
 @login_required
 def questionnaire_detail(request, questionnaire_id):
-    """问卷详情 - 包含可视化图表"""
+    """问卷详情"""
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id)
 
     # 检查权限（管理员或创建者）
@@ -938,6 +978,7 @@ def questionnaire_detail(request, questionnaire_id):
     # 获取回答数据
     responses = Response.objects.filter(
         questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
         is_submitted=True
     )
 
@@ -947,23 +988,13 @@ def questionnaire_detail(request, questionnaire_id):
         is_submitted=True
     ).count()
 
-    # 获取可视化统计数据和图表
-    stats = get_questionnaire_stats(questionnaire_id)
-
-    # 或者使用 build_stats 获取更详细的数据
-    detailed_stats = build_stats(questionnaire)
-
-    # 获取图表HTML
-    from .visualization import QuestionnaireVisualizer
-    visualizer = QuestionnaireVisualizer(questionnaire_id)
-    charts_html = visualizer.generate_dashboard_html()
-
     user_has_submitted = False
     latest_response_version = 0
     if request.user.is_authenticated:
         latest_response = Response.objects.filter(
             questionnaire=questionnaire,
             user=request.user,
+            questionnaire_version=questionnaire.version,
             is_submitted=True
         ).order_by('-submitted_at').first()
         if latest_response:
@@ -988,9 +1019,6 @@ def questionnaire_detail(request, questionnaire_id):
     return render(request, 'questionnaire/detail.html', {
         'questionnaire': questionnaire,
         'responses': responses,
-        'stats': stats,
-        'charts_html': charts_html,
-        'detailed_stats': detailed_stats,
         'response_count': responses.count(),
         'is_admin': request.user.is_admin,
         'latest_response_version': latest_response_version,
@@ -1012,11 +1040,17 @@ def questionnaire_analytics(request, questionnaire_id):
 
     from .visualization import QuestionnaireVisualizer
     visualizer = QuestionnaireVisualizer(questionnaire_id)
+    current_responses = Response.objects.filter(
+        questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True
+    ).select_related('user')
+    total_responses = current_responses.count()
 
     # 1. 平均用时
-    responses_with_time = visualizer.responses.filter(completion_time__isnull=False)
-    avg_seconds = responses_with_time.aggregate(avg=Avg('completion_time'))['avg'] or 0
-    avg_time_display = f"{int(avg_seconds//60)}分{int(avg_seconds%60)}秒" if avg_seconds else "暂无数据"
+    responses_with_time = current_responses.filter(completion_time__isnull=False)
+    avg_seconds = responses_with_time.aggregate(avg=Avg('completion_time'))['avg']
+    avg_time_display = f"{int(avg_seconds//60)}分{int(avg_seconds%60)}秒" if avg_seconds is not None else "暂无数据"
 
     # 2. 回答趋势（最近7天）
     end_date = timezone.now().date()
@@ -1027,6 +1061,7 @@ def questionnaire_analytics(request, questionnaire_id):
     for day in date_list:
         count = Response.objects.filter(
             questionnaire=questionnaire,
+            questionnaire_version=questionnaire.version,
             submitted_at__date=day,
             is_submitted=True
         ).count()
@@ -1039,6 +1074,7 @@ def questionnaire_analytics(request, questionnaire_id):
     for start_hour, end_hour in time_buckets:
         count = Response.objects.filter(
             questionnaire=questionnaire,
+            questionnaire_version=questionnaire.version,
             submitted_at__hour__gte=start_hour,
             submitted_at__hour__lt=end_hour,
             is_submitted=True
@@ -1046,7 +1082,7 @@ def questionnaire_analytics(request, questionnaire_id):
         time_data.append(count)
 
     # ========== 新增：回答时长分布数据 ==========
-    durations = [r.completion_time for r in visualizer.responses if r.completion_time]
+    durations = [r.completion_time for r in current_responses if r.completion_time is not None]
 
     # ========== 新增：各问题完成率数据 ==========
     from django.db.models import Count
@@ -1054,25 +1090,42 @@ def questionnaire_analytics(request, questionnaire_id):
     for question in visualizer.questions:
         answered_count = Answer.objects.filter(
             question=question,
+            response__questionnaire=questionnaire,
+            response__questionnaire_version=questionnaire.version,
             response__is_submitted=True
         ).values('response').distinct().count()
         completion_data.append({
             'question': question.text[:30],
-            'rate': answered_count / visualizer.responses.count() * 100 if visualizer.responses.count() else 0,
+            'rate': answered_count / total_responses * 100 if total_responses else 0,
             'answered': answered_count,
-            'total': visualizer.responses.count()
+            'total': total_responses
         })
 
     # ========== 新增：每个问题的详细数据 ==========
     question_stats = []
     for question in visualizer.questions:
-        answers = Answer.objects.filter(question=question, response__is_submitted=True)
+        answers = Answer.objects.filter(
+            question=question,
+            response__questionnaire=questionnaire,
+            response__questionnaire_version=questionnaire.version,
+            response__is_submitted=True
+        ).select_related('response__user')
+        answered_response_count = answers.values('response').distinct().count()
         if question.question_type in ['radio', 'checkbox']:
             # 选择题：统计每个选项的答案数量
             options = question.options or []
             counts = [0] * len(options)
+            other_answers = []
             for answer in answers:
                 ans_text = answer.answer_text
+                if '|' in ans_text:
+                    code_part, extra_part = ans_text.split('|', 1)
+                    if extra_part.strip():
+                        other_answers.append({
+                            'user': answer.response.user.username if answer.response.user else '匿名用户',
+                            'answer': extra_part.strip()
+                        })
+                    ans_text = code_part
                 if question.question_type == 'radio':
                     if ans_text and len(ans_text) == 1:
                         idx = ord(ans_text) - 65
@@ -1086,12 +1139,21 @@ def questionnaire_analytics(request, questionnaire_id):
                             idx = ord(part) - 65
                             if 0 <= idx < len(options):
                                 counts[idx] += 1
+                        elif part.startswith('其他:') or part.startswith('其他：'):
+                            other_answers.append({
+                                'user': answer.response.user.username if answer.response.user else '匿名用户',
+                                'answer': part
+                            })
             question_stats.append({
                 'id': str(question.id),
                 'text': question.text,
                 'type': question.question_type,
                 'options': options,
                 'counts': counts,
+                'answered_count': answered_response_count,
+                'total_responses': total_responses,
+                'no_answer_count': max(0, total_responses - answered_response_count),
+                'other_answers': other_answers,
             })
         elif question.question_type == 'text':
             # 文本题：收集所有回答文本
@@ -1106,6 +1168,9 @@ def questionnaire_analytics(request, questionnaire_id):
                 'id': str(question.id),
                 'text': question.text,
                 'type': 'text',
+                'answered_count': answered_response_count,
+                'total_responses': total_responses,
+                'no_answer_count': max(0, total_responses - answered_response_count),
                 'answers': answer_list,
                 })
         else:
@@ -1116,17 +1181,33 @@ def questionnaire_analytics(request, questionnaire_id):
                 'type': question.question_type,
             })
 
+    if questionnaire.enable_multi_qrcodes:
+        completion_total = questionnaire.qrcodes.filter(is_shared=True).count()
+        if completion_total == 0:
+            completion_total = questionnaire.qrcodes.filter(is_used=True).count()
+        completion_completed = questionnaire.qrcodes.filter(is_used=True).count()
+        completion_label = '二维码完成率'
+    else:
+        completion_total = questionnaire.view_count
+        completion_completed = total_responses
+        completion_label = '问卷完成率'
+
+    completion_rate = (completion_completed / completion_total * 100) if completion_total else 0
+
     summary = {
-        'total_responses': visualizer.responses.count(),
+        'total_responses': total_responses,
         'total_questions': visualizer.questions.count(),
-        'completion_rate': (visualizer.responses.count() / max(1, questionnaire.view_count)) * 100 if questionnaire.view_count else 0,
+        'completion_rate': completion_rate,
+        'completion_completed': completion_completed,
+        'completion_total': completion_total,
+        'completion_label': completion_label,
         'average_time': avg_time_display,
     }
 
     context = {
         'questionnaire': questionnaire,
         'summary': summary,
-        'responses': visualizer.responses,
+        'responses': current_responses,
         'trend_labels': json.dumps(trend_labels),
         'trend_data': json.dumps(trend_data),
         'time_labels': json.dumps(bucket_labels),
@@ -1557,17 +1638,93 @@ def get_notification_updates(request):
 
 def qrcode_access(request, qr_code_id):
     """通过一次性二维码访问问卷"""
-    qrcode = get_object_or_404(QuestionnaireQRCode, qr_code_id=qr_code_id)
-    if qrcode.is_used:
-        return render(request, 'error.html', {'message': '该二维码已被使用'})
+    with transaction.atomic():
+        qrcode = get_object_or_404(QuestionnaireQRCode.objects.select_for_update(), qr_code_id=qr_code_id)
+        questionnaire = qrcode.questionnaire
+        if qrcode.is_used:
+            return render(request, 'questionnaire/not_available.html', {
+                'questionnaire': questionnaire,
+                'reason': '该二维码已被使用，无法再次填写'
+            })
 
-    questionnaire = qrcode.questionnaire
-    # 将二维码ID存入 session，供提交时标记
-    request.session['active_qrcode_id'] = qr_code_id
-    # 重定向到问卷引导页（复用现有逻辑）
-    return redirect('survey_landing', survey_uuid=questionnaire.id)
+        existing_qrcode_response = qrcode.responses.filter(is_submitted=True).order_by('-submitted_at').first()
+        if existing_qrcode_response:
+            qrcode.is_used = True
+            qrcode.used_by = existing_qrcode_response.user
+            qrcode.used_at = timezone.now()
+            qrcode.save(update_fields=['is_used', 'used_by', 'used_at'])
+            from .cache import clear_questionnaire_cache
+            clear_questionnaire_cache(questionnaire)
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'questionnaire_{questionnaire.id}',
+                {
+                    'type': 'qrcode_update',
+                    'qr_code_id': qrcode.qr_code_id,
+                    'is_used': True,
+                    'used_by': existing_qrcode_response.user.username if existing_qrcode_response.user else '匿名用户',
+                    'used_at': qrcode.used_at.isoformat(),
+                    'response_id': str(existing_qrcode_response.id),
+                }
+            )
+            return render(request, 'questionnaire/not_available.html', {
+                'questionnaire': questionnaire,
+                'reason': '该二维码已被使用，无法再次填写'
+            })
 
-@login_required
+        submitted_response = None
+        if request.user.is_authenticated:
+            submitted_response = Response.objects.filter(
+                questionnaire=questionnaire,
+                user=request.user,
+                questionnaire_version=questionnaire.version,
+                is_submitted=True
+            ).order_by('-submitted_at').first()
+        else:
+            fingerprint = request.session.get('anon_fingerprint')
+            if fingerprint:
+                submitted_response = Response.objects.filter(
+                    questionnaire=questionnaire,
+                    device_fingerprint=fingerprint,
+                    questionnaire_version=questionnaire.version,
+                    is_submitted=True
+                ).order_by('-submitted_at').first()
+
+        if submitted_response:
+            if not submitted_response.qrcode_id:
+                submitted_response.qrcode = qrcode
+                submitted_response.save(update_fields=['qrcode'])
+
+            qrcode.is_used = True
+            qrcode.used_by = request.user if request.user.is_authenticated else None
+            qrcode.used_at = timezone.now()
+            qrcode.save(update_fields=['is_used', 'used_by', 'used_at'])
+
+            from .cache import clear_questionnaire_cache
+            clear_questionnaire_cache(questionnaire)
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'questionnaire_{questionnaire.id}',
+                {
+                    'type': 'qrcode_update',
+                    'qr_code_id': qrcode.qr_code_id,
+                    'is_used': True,
+                    'used_by': request.user.username if request.user.is_authenticated else '匿名用户',
+                    'used_at': qrcode.used_at.isoformat(),
+                    'response_id': str(submitted_response.id),
+                }
+            )
+
+            return render(request, 'questionnaire/not_available.html', {
+                'questionnaire': questionnaire,
+                'reason': '该二维码已被使用，无法再次填写'
+            })
+
+        # 将二维码ID存入 session，供提交时标记
+        request.session['active_qrcode_id'] = qr_code_id
+        # 重定向到问卷引导页（复用现有逻辑）
+        return redirect('survey_landing', survey_uuid=questionnaire.id)
+
 def response_detail(request, response_id):
     response = get_object_or_404(
         Response.objects.select_related('questionnaire', 'user', 'qrcode'),

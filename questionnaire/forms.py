@@ -5,8 +5,36 @@ from django.contrib.auth import get_user_model
 from .models import Questionnaire, Question, Response, QuestionnaireQRCode
 from django.utils import timezone
 import json
+import re
 
 User = get_user_model()
+
+
+def split_options_text(options_text):
+    """Normalize option input from newline text or JSON/Python-style list text."""
+    if not options_text:
+        return []
+    text = str(options_text).strip()
+    if not text:
+        return []
+    if text.startswith('[') and text.endswith(']'):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(opt).strip() for opt in parsed if str(opt).strip()]
+        except json.JSONDecodeError:
+            pass
+    return [opt.strip() for opt in text.split('\n') if opt.strip()]
+
+
+def is_other_option(option_text):
+    text = str(option_text or '').strip()
+    return text == '其他' or text.startswith('其他：') or text.startswith('其他:')
+
+
+def get_other_option_max_length(option_text):
+    match = re.search(r'限\s*(\d+)\s*字', str(option_text or ''))
+    return int(match.group(1)) if match else 0
 
 
 class LoginForm(forms.Form):
@@ -94,12 +122,20 @@ class PwdResetForm(forms.Form):
 class QuestionnaireForm(forms.ModelForm):
     start_time = forms.DateTimeField(
         required=False,
-        widget=forms.DateTimeInput(attrs={'type': 'datetime-local', 'class': 'form-control'}),
+        input_formats=['%Y-%m-%dT%H:%M', '%Y-%m-%dT%H:%M:%S'],
+        widget=forms.DateTimeInput(
+            attrs={'type': 'datetime-local', 'class': 'form-control'},
+            format='%Y-%m-%dT%H:%M'
+        ),
         label='开始时间'
     )
     end_time = forms.DateTimeField(
         required=False,
-        widget=forms.DateTimeInput(attrs={'type': 'datetime-local', 'class': 'form-control'}),
+        input_formats=['%Y-%m-%dT%H:%M', '%Y-%m-%dT%H:%M:%S'],
+        widget=forms.DateTimeInput(
+            attrs={'type': 'datetime-local', 'class': 'form-control'},
+            format='%Y-%m-%dT%H:%M'
+        ),
         label='截止时间'
     )
     limit_responses = forms.BooleanField(
@@ -146,6 +182,11 @@ class QuestionnaireForm(forms.ModelForm):
             print(f"DEBUG: initial targets set to {self.initial['targets']}")
         else:
             self.initial['targets'] = '[]'
+        if self.instance.pk:
+            if self.instance.start_time:
+                self.initial['start_time'] = self.instance.start_time.strftime('%Y-%m-%dT%H:%M')
+            if self.instance.end_time:
+                self.initial['end_time'] = self.instance.end_time.strftime('%Y-%m-%dT%H:%M')
 
     def clean_targets(self):
         data = self.cleaned_data.get('targets', '')
@@ -207,11 +248,18 @@ class QuestionForm(forms.ModelForm):
         widget=forms.NumberInput(attrs={'class': 'form-control'}),
         label='字数限制'
     )
+    max_choices_field = forms.IntegerField(
+        min_value=0,
+        initial=0,
+        required=False,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+        label='最多选择数量'
+    )
 
     class Meta:
         model = Question
         # ② 把模型里 required=True 的 max_length 排除掉，由我们手动赋值
-        exclude = ['max_length']
+        exclude = ['max_length', 'max_choices', 'conditional_parent_order', 'conditional_options']
         widgets = {
             'text': forms.TextInput(attrs={'class': 'form-control'}),
             'question_type': forms.Select(attrs={'class': 'form-select'}),
@@ -231,11 +279,12 @@ class QuestionForm(forms.ModelForm):
 
         # ④ 把表单值写回模型字段
         instance.max_length = self.cleaned_data.get('max_length_field', 0)
+        instance.max_choices = self.cleaned_data.get('max_choices_field', 0)
 
         # ⑤ 处理选项
         options_text = self.cleaned_data.get('options_text', '')
         if instance.question_type in ['radio', 'checkbox']:
-            instance.options = [opt.strip() for opt in options_text.split('\n') if opt.strip()]
+            instance.options = split_options_text(options_text)
         else:
             instance.options = []
 
@@ -249,10 +298,10 @@ QuestionFormSet = forms.inlineformset_factory(
     Questionnaire,
     Question,
     form=QuestionForm,
-    exclude=('max_length',),  # ① 完全交给表单自己去处理
+    exclude=('max_length', 'max_choices', 'conditional_parent_order', 'conditional_options'),  # ① 完全交给表单自己去处理
     extra=1,
     can_delete=True,
-    max_num=20,
+    max_num=200,
 )
 
 class SelectTargetForm(forms.Form):

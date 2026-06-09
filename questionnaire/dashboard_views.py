@@ -7,12 +7,15 @@ from django.utils import timezone
 from django.db import connection
 from django.views.decorators.http import require_POST
 from .decorators import original_admin_required
-from .forms import QuestionnaireForm, QuestionFormSet
+from .forms import QuestionnaireForm, QuestionFormSet, split_options_text
 from .models import User, Questionnaire, Response
 from django.http import HttpResponse
 from django.urls import reverse
 from django.http import JsonResponse
 import json
+import re
+import zipfile
+import xml.etree.ElementTree as ET
 from .models import Question
 import logging
 from django.db.models import Count
@@ -27,6 +30,143 @@ import time
 from django.db import connection
 
 logger = logging.getLogger('questionnaire')
+
+
+DOCX_W_NS = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+
+
+def _docx_text_from_paragraph(paragraph):
+    return ''.join(node.text or '' for node in paragraph.iter(DOCX_W_NS + 't')).strip()
+
+
+def _extract_docx_blocks(uploaded_file):
+    uploaded_file.seek(0)
+    with zipfile.ZipFile(uploaded_file) as docx_file:
+        root = ET.fromstring(docx_file.read('word/document.xml'))
+
+    body = root.find(DOCX_W_NS + 'body')
+    blocks = []
+    if body is None:
+        return blocks
+
+    for child in body:
+        if child.tag == DOCX_W_NS + 'p':
+            text = _docx_text_from_paragraph(child)
+            if text:
+                blocks.append(('p', text))
+        elif child.tag == DOCX_W_NS + 'tbl':
+            rows = []
+            for tr in child.iter(DOCX_W_NS + 'tr'):
+                cells = []
+                for tc in tr.iter(DOCX_W_NS + 'tc'):
+                    cell_text = ' '.join(
+                        _docx_text_from_paragraph(p)
+                        for p in tc.iter(DOCX_W_NS + 'p')
+                    ).strip()
+                    cells.append(cell_text)
+                if any(cells):
+                    rows.append(cells)
+            if rows:
+                blocks.append(('tbl', rows))
+    return blocks
+
+
+def _split_docx_options(text):
+    options = []
+    for part in re.split(r'[□☐]+', text):
+        option = part.strip(' \t\u3000:：')
+        if option:
+            options.append(option)
+    return options
+
+
+def _parse_docx_questionnaire(uploaded_file):
+    blocks = _extract_docx_blocks(uploaded_file)
+    paragraphs = [content for kind, content in blocks if kind == 'p']
+    title = paragraphs[0] if paragraphs else '导入的问卷'
+    description_lines = []
+    questions = []
+
+    def add_question(text, question_type='text', options=None):
+        text = text.replace('**', '').strip()
+        if text in ('开放题', '开放题：', '开放题:'):
+            return
+        text = re.sub(r'^开放题[：:]?', '', text).strip()
+        text = re.sub(r'^[-－]\s*', '', text).strip()
+        text = re.sub(r'^[（(]?(若[^）)]*)[）)]?', r'（\1）', text).strip()
+        text = re.sub(r'[_＿]{2,}', '', text).strip(' ：:')
+        if not text:
+            return
+        if any(q['text'] == text for q in questions):
+            return
+        questions.append({
+            'text': text,
+            'question_type': question_type,
+            'options': options or [],
+        })
+
+    idx = 1
+    while idx < len(blocks):
+        kind, content = blocks[idx]
+        if kind == 'tbl':
+            rows = content
+            if len(rows) > 1:
+                headers = [cell.strip() for cell in rows[0]]
+                numbered = headers and headers[0] in ('序号', '编号') and len(headers) >= 3
+                text_col = 1 if numbered else 0
+                option_headers = headers[text_col + 1:]
+                option_headers = [h for h in option_headers if h and h != '□']
+                for row in rows[1:]:
+                    if len(row) <= text_col:
+                        continue
+                    question_text = row[text_col].strip()
+                    if question_text and option_headers:
+                        add_question(question_text, 'radio', option_headers)
+            idx += 1
+            continue
+
+        line = content.strip()
+        match = re.match(r'^(\d+)[.、]\s*(.+)$', line)
+        if match:
+            question_text = match.group(2).strip()
+            options = []
+            lookahead = idx + 1
+            while lookahead < len(blocks) and blocks[lookahead][0] == 'p':
+                next_line = blocks[lookahead][1].strip()
+                if re.match(r'^\d+[.、]\s+', next_line) or next_line.startswith(('第', '（', '(', '**')):
+                    break
+                if '□' not in next_line:
+                    break
+                options.extend(_split_docx_options(next_line))
+                lookahead += 1
+            if options:
+                add_question(question_text, 'radio', options)
+                idx = lookahead
+                continue
+            add_question(question_text, 'text')
+        elif '__________' in line or '____' in line:
+            add_question(line, 'text')
+        elif questions and '□' not in line:
+            normalized = line.replace('**', '').strip()
+            if normalized in ('开放题', '开放题：', '开放题:'):
+                idx += 1
+                continue
+            normalized = re.sub(r'^开放题[：:]?', '', normalized).strip()
+            normalized = re.sub(r'^[-－]\s*', '', normalized).strip()
+            skip_prefixes = ('第', '课程评价表', '软件工程毕业要求达成情况表', '问卷到此结束', '说明', '**说明')
+            if (
+                    normalized
+                    and not normalized.startswith(skip_prefixes)
+                    and not normalized.strip('_＿') == ''
+                    and (normalized.endswith(('？', '?', '：', ':')) or '开放题' in line)
+            ):
+                add_question(normalized, 'text')
+        elif not questions and idx < 8 and not line.startswith(('-', '**')):
+            description_lines.append(line)
+        idx += 1
+
+    return title, '\n'.join(description_lines), questions
+
 def admin_required(view_func):
     """管理员权限装饰器"""
     from functools import wraps
@@ -173,6 +313,13 @@ def save_questions_from_post(request, questionnaire):
                 # 获取其他字段
                 question_type = request.POST.get(f'questions-{prefix}-question_type', 'radio')
                 required = request.POST.get(f'questions-{prefix}-required') == 'on'
+                conditional_parent_order_raw = request.POST.get(f'questions-{prefix}-conditional_parent_order', '').strip()
+                conditional_options_text = request.POST.get(f'questions-{prefix}-conditional_options', '').strip()
+                max_choices_raw = request.POST.get(f'questions-{prefix}-max_choices_field', '0').strip()
+                conditional_parent_order = None
+                if conditional_parent_order_raw.isdigit() and int(conditional_parent_order_raw) > 0:
+                    conditional_parent_order = int(conditional_parent_order_raw)
+                conditional_options = [opt.strip() for opt in conditional_options_text.split('\n') if opt.strip()]
 
                 # 创建问题对象
                 question = Question(
@@ -180,7 +327,10 @@ def save_questions_from_post(request, questionnaire):
                     text=text,
                     question_type=question_type,
                     order=question_count + 1,
-                    required=required
+                    required=required,
+                    conditional_parent_order=conditional_parent_order,
+                    conditional_options=conditional_options,
+                    max_choices=int(max_choices_raw) if max_choices_raw.isdigit() else 0,
                 )
 
                 # 处理选择题选项
@@ -188,12 +338,12 @@ def save_questions_from_post(request, questionnaire):
                     options_text = request.POST.get(f'questions-{prefix}-options_text', '').strip()
 
                     if options_text:
-                        options = [opt.strip() for opt in options_text.split('\n') if opt.strip()]
+                        options = split_options_text(options_text)
                     else:
                         options = ['选项1', '选项2']
 
                     # 保存选项（根据字段类型）
-                    question.options = json.dumps(options, ensure_ascii=False)
+                    question.options = options
 
                 # 处理简答题字数限制
                 elif question_type == 'text':
@@ -215,6 +365,52 @@ def save_questions_from_post(request, questionnaire):
                 continue
 
     return question_count
+
+
+@login_required
+@require_POST
+def import_questionnaire_docx(request):
+    uploaded_file = request.FILES.get('docx_file')
+    if not uploaded_file:
+        messages.error(request, '请选择要导入的 Word 文件')
+        return redirect('create_questionnaire')
+    if not uploaded_file.name.lower().endswith('.docx'):
+        messages.error(request, '仅支持 .docx 文件')
+        return redirect('create_questionnaire')
+
+    try:
+        title, description, questions = _parse_docx_questionnaire(uploaded_file)
+    except Exception as e:
+        logger.exception('Word 问卷导入失败')
+        messages.error(request, f'Word 文件解析失败: {e}')
+        return redirect('create_questionnaire')
+
+    if not questions:
+        messages.error(request, '未从 Word 文件中识别到问题，请检查题号、选项或表格格式')
+        return redirect('create_questionnaire')
+
+    questionnaire = Questionnaire.objects.create(
+        title=title[:200],
+        description=description,
+        creator=request.user,
+        status='draft',
+        access_type='public',
+    )
+    for order, question_data in enumerate(questions, start=1):
+        Question.objects.create(
+            questionnaire=questionnaire,
+            text=question_data['text'],
+            question_type=question_data['question_type'],
+            options=question_data['options'],
+            required=True,
+            order=order,
+            max_length=0,
+        )
+
+    messages.success(request, f'已从 Word 导入 {len(questions)} 个问题，生成草稿后可继续编辑')
+    return redirect('edit_questionnaire', questionnaire_id=questionnaire.id)
+
+
 @login_required
 def create_questionnaire(request):
     """创建问卷"""
@@ -238,6 +434,7 @@ def create_questionnaire(request):
                         logger.debug(f"===== template found, is_multi_target = {template.is_multi_target} =====")
                         questionnaire.is_multi_target = template.is_multi_target
                         #questionnaire.targets = template.targets
+                        #这个不允许取消注释，取消会导致模板值覆盖填写值
                         logger.debug(f"===== after assignment, is_multi_target = {questionnaire.is_multi_target} =====")
                     except Questionnaire.DoesNotExist:
                         logger.debug(f"===== template with id {template_id} not found =====")
@@ -259,6 +456,11 @@ def create_questionnaire(request):
 
                 # 保存问卷
                 questionnaire.save()
+                # 确保多目标标志正确（直接使用模板的值）
+                if request.POST.get('from_template') == '1' and template_id:
+                    if questionnaire.is_multi_target != template.is_multi_target:
+                        questionnaire.is_multi_target = template.is_multi_target
+                        questionnaire.save(update_fields=['is_multi_target'])
                 logger.debug(f"===== after save, questionnaire.is_multi_target = {questionnaire.is_multi_target} =====")
 
 
@@ -398,7 +600,11 @@ def create_questionnaire(request):
                 # 保存为草稿
                 questionnaire.status = 'draft'
                 questionnaire.save()
-
+                # 确保多目标标志正确（直接使用模板的值）
+                if request.POST.get('from_template') == '1' and template_id:
+                    if questionnaire.is_multi_target != template.is_multi_target:
+                        questionnaire.is_multi_target = template.is_multi_target
+                        questionnaire.save(update_fields=['is_multi_target'])
                 # 保存问题
                 save_questions_from_post(request, questionnaire)
                 # ========== 保存停止条件 ==========
@@ -673,15 +879,12 @@ def questionnaire_detail(request, questionnaire_id):
         has_available_qrcode = True
         if questionnaire.enable_multi_qrcodes:
             has_available_qrcode = questionnaire.qrcodes.filter(is_used=False).exists()
-        submit_count = questionnaire.submit_count
         detail_data = {
             'has_available_qrcode': has_available_qrcode,
-            'submit_count': submit_count,
         }
         cache.set(cache_key, detail_data, 60)
 
     has_available_qrcode = detail_data['has_available_qrcode']
-    submit_count = detail_data['submit_count']
 
     # ========== 使用原始 SQL 查询问题列表，彻底绕过 ORM 连接状态 ==========
     from django.db import connection
@@ -714,13 +917,28 @@ def questionnaire_detail(request, questionnaire_id):
 
     user_has_submitted = False
     if request.user.is_authenticated:
-        user_has_submitted = Response.objects.filter(
-            questionnaire=questionnaire,
-            user=request.user,
-            is_submitted=True
-        ).exists()
+        if questionnaire.is_multi_target:
+            # 多目标问卷：检查是否所有目标都已提交
+            submitted_targets = Response.objects.filter(
+                questionnaire=questionnaire,
+                user=request.user,
+                questionnaire_version=questionnaire.version,
+                is_submitted=True
+            ).values_list('target_name', flat=True)
+            user_has_submitted = all(t in submitted_targets for t in questionnaire.targets)
+        else:
+            user_has_submitted = Response.objects.filter(
+                questionnaire=questionnaire,
+                user=request.user,
+                questionnaire_version=questionnaire.version,
+                is_submitted=True
+            ).exists()
 
-    responses = Response.objects.filter(questionnaire=questionnaire)
+    responses = Response.objects.filter(
+        questionnaire=questionnaire,
+        questionnaire_version=questionnaire.version,
+        is_submitted=True,
+    )
     now = timezone.now()
 
     # 调试输出（可选）
@@ -735,6 +953,7 @@ def questionnaire_detail(request, questionnaire_id):
         questionnaire_version=questionnaire.version,
         is_submitted=True
     ).count()
+    submit_count = current_version_submit_count
 
     # 获取当前用户的最新提交版本和提交状态
     user_has_submitted = False
@@ -743,6 +962,7 @@ def questionnaire_detail(request, questionnaire_id):
         latest_response = Response.objects.filter(
             questionnaire=questionnaire,
             user=request.user,
+            questionnaire_version=questionnaire.version,
             is_submitted=True
         ).order_by('-submitted_at').first()
         if latest_response:
@@ -1404,6 +1624,7 @@ def api_questionnaire_detail(request, questionnaire_id):
         user_has_submitted = Response.objects.filter(
             questionnaire=questionnaire,
             user=request.user,
+            questionnaire_version=questionnaire.version,
             is_submitted=True
         ).exists()
 

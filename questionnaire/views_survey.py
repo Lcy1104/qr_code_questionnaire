@@ -3,6 +3,7 @@ import logging
 import time
 import json
 import uuid
+from datetime import timezone as dt_timezone
 from django.views.decorators.cache import never_cache
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -13,12 +14,47 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .forms import SelectTargetForm
+from .forms import get_other_option_max_length, is_other_option
 from .models import Questionnaire, Response, Answer, QuestionnaireQRCode,Question
 from .notification_manager  import NotificationManager
 from django.contrib import messages
 from django.core.cache import cache  # ===== 新增（移到顶部统一导入）=====
+from django.db.models import F
 
 logger = logging.getLogger(__name__)
+
+
+def _survey_start_key(questionnaire, target_name=''):
+    return f'survey_start:{questionnaire.id}:v{questionnaire.version}:{target_name or "_"}'
+
+
+def _get_or_set_survey_start(request, questionnaire, target_name=''):
+    key = _survey_start_key(questionnaire, target_name)
+    start_time = request.session.get(key)
+    if not start_time:
+        start_time = timezone.now().isoformat()
+        request.session[key] = start_time
+    return start_time
+
+
+def _calculate_completion_time(request, questionnaire, target_name='', submitted_at=None):
+    start_str = request.POST.get('start_time') or request.session.get(_survey_start_key(questionnaire, target_name))
+    if not start_str:
+        logger.warning("start_time 为空，无法计算 completion_time")
+        return None
+
+    try:
+        start = parse_datetime(start_str)
+        if not start:
+            return None
+        if start.tzinfo is None or start.tzinfo.utcoffset(start) is None:
+            start = timezone.make_aware(start, dt_timezone.utc)
+        submitted_at = submitted_at or timezone.now()
+        completion_time = int((submitted_at - start).total_seconds())
+        return max(0, completion_time)
+    except Exception as e:
+        logger.error(f'计算 completion_time 异常: {e}')
+        return None
 
 def survey_landing(request, survey_uuid):
     """
@@ -80,6 +116,27 @@ def survey_landing(request, survey_uuid):
 @never_cache
 def survey_fill(request, survey_uuid):
     questionnaire = get_object_or_404(Questionnaire, id=survey_uuid, status='published')
+    viewed_key = f'viewed_q_{questionnaire.id}_v{questionnaire.version}'
+    if not request.session.get(viewed_key):
+        Questionnaire.objects.filter(id=questionnaire.id).update(view_count=F('view_count') + 1)
+        questionnaire.refresh_from_db()
+        request.session[viewed_key] = True
+    # 强制匿名模式：如果 URL 带有 ?anonymous=1，则临时将 request.user 视为未登录
+    force_anonymous = request.GET.get('anonymous') == '1'
+    if force_anonymous:
+        # 注意：不能修改 request.user，但我们可以设置一个标志位
+        print(force_anonymous)
+        pass
+    can_access, reason = questionnaire.can_be_accessed_by(
+        user=request.user,
+        invite_code=request.session.get('valid_invite_code')
+    )
+    if not can_access:
+        # 渲染不可用页面，显示具体原因
+        return render(request, 'questionnaire/not_available.html', {
+            'questionnaire': questionnaire,
+            'reason': reason
+        })
 
     # ===== 修改：原有跳转逻辑，仅对非多目标问卷执行 =====
     if questionnaire.targets and not questionnaire.is_multi_target:
@@ -95,9 +152,9 @@ def survey_fill(request, survey_uuid):
         if target not in questionnaire.targets:
             messages.error(request, '无效的评价目标')
             return redirect('multi_target_dashboard', questionnaire_id=questionnaire.id)
-
+        #is_anon_mode = request.GET.get('anonymous') == '1'
         # 检查该目标是否已提交
-        if request.user.is_authenticated:
+        if request.user.is_authenticated and not force_anonymous:
             exists = Response.objects.filter(
                 questionnaire=questionnaire,
                 user=request.user,
@@ -139,6 +196,7 @@ def survey_fill(request, survey_uuid):
 
     # 判断是否为匿名模式（通过 URL 参数 ?anonymous=1 触发）
     is_anonymous_mode = request.GET.get('anonymous') == '1'
+    survey_start_time = _get_or_set_survey_start(request, questionnaire, current_target)
 
     # 未登录且非匿名模式，重定向到引导页（由引导页决定登录或匿名）
     if not request.user.is_authenticated and not is_anonymous_mode:
@@ -147,12 +205,18 @@ def survey_fill(request, survey_uuid):
     if request.user.is_authenticated and not is_anonymous_mode:
         # 已登录且非匿名模式：正常登录用户填写
         if not questionnaire.is_multi_target:
-            if Response.objects.filter(questionnaire=questionnaire, user=request.user).exists():
+            if Response.objects.filter(
+                questionnaire=questionnaire,
+                user=request.user,
+                questionnaire_version=questionnaire.version,
+                is_submitted=True
+            ).exists():
                 return render(request, 'questionnaire/already_submitted.html', {
                     'questionnaire': questionnaire
                 })
         questions = questionnaire.questions.all().order_by('order').values(
-            'id', 'text', 'question_type', 'options', 'required', 'max_length'
+            'id', 'text', 'question_type', 'options', 'required', 'max_length', 'max_choices', 'order',
+            'conditional_parent_order', 'conditional_options'
         )
         # ===== 新增：预填答案（登录用户）=====
         answers_dict = {}
@@ -188,11 +252,14 @@ def survey_fill(request, survey_uuid):
             'current_target': current_target,  # ===== 新增 =====
             'answers_dict': json.dumps(answers_dict),  # ===== 新增 =====
             'anonymous_fingerprint': None,  # ===== 新增 =====
+            'active_qrcode_id': request.session.get('active_qrcode_id'),
+            'survey_start_time': survey_start_time,
         })
     else:
         # 匿名模式（包括未登录用户或已登录但选择匿名）
         questions = questionnaire.questions.all().order_by('order').values(
-            'id', 'text', 'question_type', 'options', 'required', 'max_length'
+            'id', 'text', 'question_type', 'options', 'required', 'max_length', 'max_choices', 'order',
+            'conditional_parent_order', 'conditional_options'
         )
         # ===== 新增：预填答案（匿名用户）和指纹同步 =====
         answers_dict = {}
@@ -236,23 +303,31 @@ def survey_fill(request, survey_uuid):
             'current_target': current_target,  # ===== 新增 =====
             'answers_dict': json.dumps(answers_dict),  # ===== 新增 =====
             'anonymous_fingerprint': anonymous_fingerprint,  # ===== 新增 =====
+            'active_qrcode_id': request.session.get('active_qrcode_id'),
+            'survey_start_time': survey_start_time,
         })
 
 # ===== 新增：答案保存辅助函数 =====
 def _save_answers(response, request, check_required=False):
     """保存答案到 response，check_required 为 True 时检查必填"""
     questionnaire = response.questionnaire
+    answer_objects = []
     for q in questionnaire.questions.all():
+        from .utils import question_is_visible
+        if not question_is_visible(questionnaire, q, request.POST):
+            continue
         key = f'question_{q.id}'
         raw = request.POST.get(f'maxlen_{q.id}', '0').strip()
         if raw.isdigit():
-            q.max_length = int(raw)
-            q.save(update_fields=['max_length'])
+            max_length = int(raw)
+            if q.max_length != max_length:
+                q.max_length = max_length
+                q.save(update_fields=['max_length'])
 
         if q.question_type == 'text':
             val = request.POST.get(key, '').strip()
             if val:
-                Answer.objects.create(response=response, question=q, answer_text=val)
+                answer_objects.append(Answer(response=response, question=q, answer_text=val))
             elif check_required and q.required:
                 return f'问题“{q.text}”是必填项，请填写内容。'
 
@@ -265,12 +340,24 @@ def _save_answers(response, request, check_required=False):
                 if opt_idx < 0 or opt_idx >= len(q.options):
                     return '选项超出范围'
                 selected_option = chr(65 + opt_idx)
-                Answer.objects.create(response=response, question=q, answer_text=selected_option)
+                option_text = str(q.options[opt_idx]).strip()
+                if is_other_option(option_text):
+                    other_text = request.POST.get(f'other_{q.id}_{opt_idx}', '').strip()
+                    if check_required and not other_text:
+                        return f'问题“{q.text}”选择“其他”时请填写具体内容。'
+                    max_len = get_other_option_max_length(option_text)
+                    if max_len and len(other_text) > max_len:
+                        return f'问题“{q.text}”的其他补充内容不能超过{max_len}字。'
+                    if other_text:
+                        selected_option = f'{selected_option}|其他:{other_text}'
+                answer_objects.append(Answer(response=response, question=q, answer_text=selected_option))
             elif check_required and q.required:
                 return f'问题“{q.text}”是必选题，请选择一个选项。'
 
         elif q.question_type == 'checkbox':
             vals = request.POST.getlist(key)
+            if q.max_choices and len(vals) > q.max_choices:
+                return f'问题“{q.text}”最多只能选择{q.max_choices}项。'
             selected_options = []
             for v in vals:
                 if not v.isdigit():
@@ -279,28 +366,53 @@ def _save_answers(response, request, check_required=False):
                 if opt_idx < 0 or opt_idx >= len(q.options):
                     return '选项超出范围'
                 selected_options.append(chr(65 + opt_idx))
+                option_text = str(q.options[opt_idx]).strip()
+                if is_other_option(option_text):
+                    other_text = request.POST.get(f'other_{q.id}_{opt_idx}', '').strip()
+                    if check_required and not other_text:
+                        return f'问题“{q.text}”选择“其他”时请填写具体内容。'
+                    max_len = get_other_option_max_length(option_text)
+                    if max_len and len(other_text) > max_len:
+                        return f'问题“{q.text}”的其他补充内容不能超过{max_len}字。'
+                    if other_text:
+                        selected_options.append(f'其他:{other_text}')
             if selected_options:
                 answer_text = ','.join(selected_options)
-                Answer.objects.create(response=response, question=q, answer_text=answer_text)
+                answer_objects.append(Answer(response=response, question=q, answer_text=answer_text))
             elif check_required and q.required:
                 return f'问题“{q.text}”是必选题，请至少选择一个选项。'
+    if answer_objects:
+        Answer.objects.bulk_create(answer_objects)
     return None
 # ===== 新增结束 =====
 
 @transaction.atomic
 def handle_survey_submission(request, questionnaire_id):
-    # 先检查是否为 AJAX 请求（通过头部）
-    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status='published')
 
-    # 例外情况：如果请求中包含有效的 device_fingerprint，则视为匿名AJAX提交（因为只有前端匿名脚本会添加此字段）
+    # ===== 1. 邀请码 session 验证（新增）=====
+    if questionnaire.access_type == 'invite':
+        valid_code = request.session.get('valid_invite_code')
+        if not valid_code or valid_code != questionnaire.invite_code:
+            return JsonResponse({'ok': False, 'msg': '邀请码验证已失效，请重新通过邀请链接访问'}, status=403)
+
+    # ===== 2. 原有 AJAX/指纹检查（仅适用于匿名用户或非登录态）=====
+    is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     fingerprint = request.POST.get('device_fingerprint', '').strip()
     has_valid_fingerprint = fingerprint and len(fingerprint) >= 16
 
-    # 如果不是 AJAX 且没有有效指纹，则拒绝
-    if not is_ajax and not has_valid_fingerprint:
-        return JsonResponse({'ok': False, 'msg': '请使用 AJAX 提交'}, status=400)
+    # 确定是否为已登录且未选择匿名模式的用户
+    is_authenticated_user = request.user.is_authenticated and request.POST.get('anonymous') != '1'
 
-    questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status='published')
+    # 只有非登录态且非匿名用户才强制要求 AJAX 或指纹
+    if not is_authenticated_user and not is_ajax and not has_valid_fingerprint:
+        return JsonResponse({'ok': False, 'msg': '请使用 AJAX 提交'}, status=400)
+    can_access, reason = questionnaire.can_be_accessed_by(
+        user=request.user,
+        invite_code=request.session.get('valid_invite_code')
+    )
+    if not can_access:
+        return JsonResponse({'ok': False, 'msg': reason}, status=400)
     logger.debug(f"问卷 {questionnaire_id} is_multi_target = {questionnaire.is_multi_target}")
     # 如果希望看到更详细的信息，可以打印所有 POST 数据
     logger.debug(f"POST data: {dict(request.POST)}")
@@ -315,10 +427,16 @@ def handle_survey_submission(request, questionnaire_id):
         if action == 'submit':
             logger.debug("进入提交处理，is_multi_target = %s", questionnaire.is_multi_target)
             now = timezone.now()
+
             if questionnaire.end_time and now > questionnaire.end_time:
                 return JsonResponse({'ok': False, 'msg': '问卷已截止'}, status=400)
             if questionnaire.limit_responses and questionnaire.max_responses is not None:
-                if questionnaire.submit_count >= questionnaire.max_responses:
+                current_submit_count = Response.objects.filter(
+                    questionnaire=questionnaire,
+                    questionnaire_version=questionnaire.version,
+                    is_submitted=True,
+                ).count()
+                if current_submit_count >= questionnaire.max_responses:
                     return JsonResponse({'ok': False, 'msg': '问卷已达到收集上限'}, status=400)
 
             if not questionnaire.is_multi_target:
@@ -361,23 +479,11 @@ def handle_survey_submission(request, questionnaire_id):
         response.save()
         # ===== 修改结束 =====
 
-        # 计算完成时间（原有逻辑）
+        # 计算完成时间
         submitted_at = timezone.now()
-        start_str = request.POST.get('start_time')
-        completion_time = None
-        if start_str:
-            try:
-                start = parse_datetime(start_str)
-                if start.tzinfo is None or start.tzinfo.utcoffset(start) is None:
-                    start = timezone.make_aware(start, timezone.utc)
-                start = start.astimezone(timezone.get_default_timezone())
-                submitted_at = submitted_at.astimezone(timezone.get_default_timezone())
-                completion_time = int((submitted_at - start).total_seconds())
-                response.completion_time = completion_time  # ===== 新增：赋值 =====
-            except Exception as e:
-                logger.error(f'计算 completion_time 异常: {e}')
-        else:
-            logger.warning("start_time 为空，无法计算 completion_time")
+        completion_time = _calculate_completion_time(request, questionnaire, target_name, submitted_at)
+        if completion_time is not None:
+            response.completion_time = completion_time
 
         # ===== 新增：保存答案（调用辅助函数）=====
         error = _save_answers(response, request, check_required=(action == 'submit'))
@@ -404,7 +510,7 @@ def handle_survey_submission(request, questionnaire_id):
 
             # 2. 如果没有绑定，则执行原分配逻辑
             if not qrcode_obj:
-                specific_id = request.session.get('active_qrcode_id')
+                specific_id = request.session.get('active_qrcode_id') or request.POST.get('active_qrcode_id')
                 if specific_id:
                     try:
                         qrcode_obj = QuestionnaireQRCode.objects.select_for_update().get(
@@ -416,18 +522,27 @@ def handle_survey_submission(request, questionnaire_id):
                             qrcode_obj.is_shared = True
                             qrcode_obj.save(update_fields=['is_shared'])
                     except QuestionnaireQRCode.DoesNotExist:
-                        return JsonResponse({'ok': False, 'msg': '指定的二维码无效或已被使用'}, status=400)
-                else:
-                    qrcode_obj = QuestionnaireQRCode.objects.select_for_update().filter(
-                        questionnaire=questionnaire,
-                        is_used=False,
-                        is_shared=False
-                    ).first()
-                    if not qrcode_obj:
-                        return JsonResponse({'ok': False, 'msg': '当前无可用的二维码，请稍后再试'}, status=400)
+                        request.session.pop('active_qrcode_id', None)
+                        request.session.pop('bound_qrcode_id', None)
+                        qrcode_obj = None
 
-                # 分配后，将二维码 ID 存入 session 作为绑定
-                request.session['bound_qrcode_id'] = qrcode_obj.qr_code_id
+            if not qrcode_obj:
+                # 分配一个新的二维码
+                qrcode_obj = QuestionnaireQRCode.objects.select_for_update().filter(
+                    questionnaire=questionnaire,
+                    is_used=False,
+                    is_shared=False
+                ).first()
+                if not qrcode_obj:
+                    if questionnaire.is_multi_target:
+                        # 多目标问卷如果没有可用二维码，可能已经全部完成，允许继续（不关联）
+                        logger.warning(f"多目标问卷 {questionnaire.id} 无可用的二维码，但允许继续提交")
+                    else:
+                        return JsonResponse({'ok': False, 'msg': '当前无可用的二维码，请稍后再试'}, status=400)
+                else:
+                    request.session['bound_qrcode_id'] = qrcode_obj.qr_code_id
+                    qrcode_obj.is_shared = True
+                    qrcode_obj.save(update_fields=['is_shared'])
 
         if qrcode_obj:
             response.qrcode = qrcode_obj
@@ -436,11 +551,22 @@ def handle_survey_submission(request, questionnaire_id):
         # ===== 修改：根据 action 执行不同操作 =====
         if action == 'submit':
             response.is_submitted = True
+            response.submitted_at = submitted_at
             response.save()
+            request.session.pop(_survey_start_key(questionnaire, target_name), None)
 
             # 更新问卷提交计数
             questionnaire.submit_count += 1
             questionnaire.save()
+            if qrcode_obj:
+                qrcode_obj.is_used = True
+                qrcode_obj.used_by = request.user
+                qrcode_obj.used_at = timezone.now()
+                qrcode_obj.save(update_fields=['is_used', 'used_by', 'used_at'])
+                request.session.pop('active_qrcode_id', None)
+                request.session.pop('bound_qrcode_id', None)
+                from .cache import clear_questionnaire_cache
+                clear_questionnaire_cache(questionnaire)
             # ========== 检查停止条件 ==========
             stop_conditions = questionnaire.stop_condition
             if stop_conditions and isinstance(stop_conditions, list):
@@ -526,13 +652,7 @@ def handle_survey_submission(request, questionnaire_id):
                     is_submitted=True
                 ).values_list('target_name', flat=True)
                 all_completed = all(t in submitted_targets for t in questionnaire.targets)
-                if all_completed and qrcode_obj:
-                    # 标记二维码为已完成
-                    qrcode_obj.is_used = True
-                    qrcode_obj.used_by = request.user
-                    qrcode_obj.used_at = timezone.now()
-                    qrcode_obj.save(update_fields=['is_used', 'used_by', 'used_at'])
-                    request.session.pop('bound_qrcode_id', None)
+                if qrcode_obj:
                     # 发送 WebSocket 广播
                     channel_layer = get_channel_layer()
                     async_to_sync(channel_layer.group_send)(
@@ -551,6 +671,9 @@ def handle_survey_submission(request, questionnaire_id):
                     redirect_url = reverse('survey_thank_you', args=[questionnaire.id])
                 else:
                     redirect_url = reverse('multi_target_dashboard', args=[questionnaire.id])
+                    # 如果是匿名模式，添加 anonymous=1 参数
+                    if is_anonymous_mode:
+                        redirect_url += '?anonymous=1'
             else:
                 # 原有单目标重定向
                 if qrcode_obj:
@@ -595,22 +718,22 @@ def handle_survey_submission(request, questionnaire_id):
 
         # 如果是最终提交，进行严格检查
         if action == 'submit':
-            cache_key = f'survey:anon:{questionnaire.id}:{fingerprint}:v{questionnaire.version}'
-            if cache.get(cache_key):
-                return JsonResponse({'ok': False, 'msg': '您已提交过当前版本'}, status=403)
-
             now = timezone.now()
             if questionnaire.end_time and now > questionnaire.end_time:
                 return JsonResponse({'ok': False, 'msg': '问卷已截止'}, status=400)
             if questionnaire.limit_responses and questionnaire.max_responses is not None:
-                if questionnaire.submit_count >= questionnaire.max_responses:
+                current_submit_count = Response.objects.filter(
+                    questionnaire=questionnaire,
+                    questionnaire_version=questionnaire.version,
+                    is_submitted=True,
+                ).count()
+                if current_submit_count >= questionnaire.max_responses:
                     return JsonResponse({'ok': False, 'msg': '问卷已达到收集上限'}, status=400)
 
             if not questionnaire.is_multi_target:
                 cache_key = f'survey:anon:{questionnaire.id}:{fingerprint}:v{questionnaire.version}'
                 if cache.get(cache_key):
                     return JsonResponse({'ok': False, 'msg': '您已提交过当前版本'}, status=403)
-
                 if Response.objects.filter(
                         questionnaire=questionnaire,
                         device_fingerprint=fingerprint,
@@ -657,23 +780,15 @@ def handle_survey_submission(request, questionnaire_id):
                 target_name=target_name,
                 is_submitted=False
             )
-        response.save()  # 确保有主键
+        response.save()
+        # 强制数据库更新 user 为 NULL
+        Response.objects.filter(pk=response.pk).update(user=None)
 
         # 计算完成时间
         submitted_at = timezone.now()
-        start_str = request.POST.get('start_time')
-        completion_time = None
-        if start_str:
-            try:
-                start = parse_datetime(start_str)
-                if start.tzinfo is None:
-                    start = timezone.make_aware(start, timezone.utc)
-                start = start.astimezone(timezone.get_default_timezone())
-                submitted_at = submitted_at.astimezone(timezone.get_default_timezone())
-                completion_time = int((submitted_at - start).total_seconds())
-                response.completion_time = completion_time
-            except Exception as e:
-                logger.error(f'匿名计算 completion_time 异常: {e}')
+        completion_time = _calculate_completion_time(request, questionnaire, target_name, submitted_at)
+        if completion_time is not None:
+            response.completion_time = completion_time
 
         # 二维码处理
         qrcode_obj = None
@@ -691,7 +806,7 @@ def handle_survey_submission(request, questionnaire_id):
                     qrcode_obj = None
 
             if not qrcode_obj:
-                specific_id = request.session.get('active_qrcode_id')
+                specific_id = request.session.get('active_qrcode_id') or request.POST.get('active_qrcode_id')
                 if specific_id:
                     try:
                         qrcode_obj = QuestionnaireQRCode.objects.select_for_update().get(
@@ -703,8 +818,11 @@ def handle_survey_submission(request, questionnaire_id):
                             qrcode_obj.is_shared = True
                             qrcode_obj.save(update_fields=['is_shared'])
                     except QuestionnaireQRCode.DoesNotExist:
-                        return JsonResponse({'ok': False, 'msg': '指定的二维码无效'}, status=400)
-                else:
+                        request.session.pop('active_qrcode_id', None)
+                        request.session.pop('bound_qrcode_id', None)
+                        qrcode_obj = None
+
+                if not qrcode_obj:
                     qrcode_obj = QuestionnaireQRCode.objects.select_for_update().filter(
                         questionnaire=questionnaire,
                         is_used=False,
@@ -725,10 +843,21 @@ def handle_survey_submission(request, questionnaire_id):
 
         if action == 'submit':
             response.is_submitted = True
+            response.submitted_at = submitted_at
             response.save()
-
+            request.session.pop(_survey_start_key(questionnaire, target_name), None)
+            Response.objects.filter(pk=response.pk).update(user=None)
             questionnaire.submit_count += 1
             questionnaire.save()
+            if qrcode_obj:
+                qrcode_obj.is_used = True
+                qrcode_obj.used_by = None
+                qrcode_obj.used_at = timezone.now()
+                qrcode_obj.save(update_fields=['is_used', 'used_by', 'used_at'])
+                request.session.pop('active_qrcode_id', None)
+                request.session.pop('bound_qrcode_id', None)
+                from .cache import clear_questionnaire_cache
+                clear_questionnaire_cache(questionnaire)
             # ========== 检查停止条件 ==========
             stop_conditions = questionnaire.stop_condition
             if stop_conditions and isinstance(stop_conditions, list):
@@ -779,31 +908,21 @@ def handle_survey_submission(request, questionnaire_id):
                     questionnaire.status = 'closed'
                     questionnaire.closed_reason = close_reason
                     questionnaire.save(update_fields=['status', 'closed_reason'])
-                    try:
-                        from .notification_manager import NotificationManager
-                        NotificationManager.create_notification(
-                            user=questionnaire.creator,
-                            title=f"问卷已自动关闭：{questionnaire.title}",
-                            message=close_reason,
-                            notification_type='system',
-                            related_questionnaire=questionnaire,
-                            priority='high'
-                        )
-                    except Exception as e:
-                        logger.error(f"发送关闭通知失败: {e}")
+                    # 非多目标问卷才发送每次提交的通知
+                    if not questionnaire.is_multi_target:
+                        try:
+                            from .notification_manager import NotificationManager
+                            NotificationManager.create_notification(
+                                user=questionnaire.creator,
+                                title=f"新答卷：{questionnaire.title}",
+                                message="一位匿名用户提交了一份新答卷。",
+                                notification_type='system',
+                                related_questionnaire=questionnaire,
+                                priority='normal'
+                            )
+                        except Exception as e:
+                            logger.error(f"发送新答卷通知失败: {e}")
             # ========== 停止条件检查结束 ==========
-            try:
-                from .notification_manager import NotificationManager
-                NotificationManager.create_notification(
-                    user=questionnaire.creator,
-                    title=f"新答卷：{questionnaire.title}",
-                    message="一位匿名用户提交了一份新答卷。",
-                    notification_type='system',
-                    related_questionnaire=questionnaire,
-                    priority='normal'
-                )
-            except Exception as e:
-                logger.error(f"发送新答卷通知失败: {e}")
 
             # Redis 缓存
             cache_key = f'survey:anon:{questionnaire.id}:{fingerprint}:v{questionnaire.version}'
@@ -818,14 +937,27 @@ def handle_survey_submission(request, questionnaire_id):
                     is_submitted=True
                 ).values_list('target_name', flat=True)
                 all_completed = all(t in submitted_targets for t in questionnaire.targets)
-                if all_completed and qrcode_obj:
-                    qrcode_obj.is_used = True
-                    qrcode_obj.used_by = None
-                    qrcode_obj.used_at = timezone.now()
-                    qrcode_obj.save(update_fields=['is_used', 'used_by', 'used_at'])
-                    request.session.pop('bound_qrcode_id', None)
-
-                redirect_url = reverse('survey_thank_you', args=[questionnaire.id]) if all_completed else reverse('multi_target_dashboard', args=[questionnaire.id])
+                if qrcode_obj:
+                    # 多目标全部完成时发送一次通知
+                    if all_completed:
+                        try:
+                            from .notification_manager import NotificationManager
+                            NotificationManager.create_notification(
+                                user=questionnaire.creator,
+                                title=f"问卷已完成：{questionnaire.title}",
+                                message="一位匿名用户已完成全部评价。",
+                                notification_type='system',
+                                related_questionnaire=questionnaire,
+                                priority='normal'
+                            )
+                        except Exception as e:
+                            logger.error(f"发送完成通知失败: {e}")
+                if all_completed:
+                    redirect_url = reverse('survey_thank_you', args=[questionnaire.id])
+                else:
+                    redirect_url = reverse('multi_target_dashboard', args=[questionnaire.id])
+                    # 匿名模式下保留 anonymous=1 参数
+                    redirect_url += '?anonymous=1'
             else:
                 # 单目标/普通问卷：提交后立即标记二维码
                 if qrcode_obj:
@@ -866,7 +998,10 @@ def survey_thank_you(request, survey_uuid):
 def multi_target_dashboard(request, questionnaire_id):
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, is_multi_target=True)
 
-    can_access, reason = questionnaire.can_be_accessed_by(user=request.user)
+    can_access, reason = questionnaire.can_be_accessed_by(
+        user=request.user,
+        invite_code=request.session.get('valid_invite_code')
+    )
     if not can_access:
         # 如果问卷已关闭且有具体关闭原因，使用 closed_reason 作为详细原因
         display_reason = questionnaire.closed_reason if (
@@ -876,13 +1011,14 @@ def multi_target_dashboard(request, questionnaire_id):
             'reason': display_reason
         })
 
-    if not request.user.is_authenticated:
+    is_anonymous_mode = request.GET.get('anonymous') == '1'
+    if is_anonymous_mode or not request.user.is_authenticated:
         if 'anon_fingerprint' not in request.session:
             import uuid
             request.session['anon_fingerprint'] = str(uuid.uuid4())
 
     # 确定用户标识
-    if request.user.is_authenticated:
+    if request.user.is_authenticated and not is_anonymous_mode:
         user_filter = {'user': request.user}
         user_identifier = request.user.username
     else:
@@ -928,7 +1064,6 @@ def multi_target_dashboard(request, questionnaire_id):
 
     all_completed = all(t['status'] == 'submitted' for t in targets_status)
     has_any_draft = any(t['status'] == 'draft' for t in targets_status)
-
     context = {
         'questionnaire': questionnaire,
         'targets_status': targets_status,
@@ -936,6 +1071,7 @@ def multi_target_dashboard(request, questionnaire_id):
         'has_any_draft': has_any_draft,
         'is_authenticated': request.user.is_authenticated,
         'user_identifier': user_identifier,
+        'is_anonymous_mode': is_anonymous_mode,
     }
     return render(request, 'questionnaire/multi_target_dashboard.html', context)
 
@@ -947,7 +1083,12 @@ def handle_batch_submit(request, questionnaire_id):
         return JsonResponse({'ok': False, 'msg': '仅支持POST'}, status=405)
 
     questionnaire = get_object_or_404(Questionnaire, id=questionnaire_id, status='published')
-
+    # ========== 邀请码 session 验证 ==========
+    if questionnaire.access_type == 'invite':
+        valid_code = request.session.get('valid_invite_code')
+        if not valid_code or valid_code != questionnaire.invite_code:
+            return JsonResponse({'ok': False, 'msg': '邀请码验证已失效，请重新访问'}, status=403)
+    # =====================================
     # 确定用户标识
     is_anonymous = not request.user.is_authenticated or request.POST.get('anonymous') == '1'
     if is_anonymous:
