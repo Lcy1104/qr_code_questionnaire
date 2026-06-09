@@ -11,10 +11,10 @@ __pycache__/
 .Python
 env/
 venv/
-.env
-.docx
-.doc
-.ppt
-.pptx
-.xls
-.xlsx
+*.env
+*.docx
+*.doc
+*.ppt
+*.pptx
+*.xls
+*.xlsx
