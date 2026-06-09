@@ -193,7 +193,7 @@
                                         <td>{{ forloop.counter }}</td>
                                         <td>{% if response.user %}{{ response.user.username }}{% else %}匿名用户{% endif %}</td>
                                         <td>{{ response.submitted_at|date:"Y-m-d H:i:s" }}</td>
-                                        <td>{% if response.completion_time %}{{ response.completion_time }}{% else %}--{% endif %}</td>
+                                        <td>{% if response.completion_time is not None %}{{ response.completion_time }}{% else %}--{% endif %}</td>
                                         <td><a href="{% url 'response_detail' response.id %}" class="btn btn-sm btn-outline-primary">详情</a></td>
                                     </tr>
                                     {% empty %}
@@ -214,9 +214,9 @@
                     <div class="card-body text-center py-4">
                         <h4 class="mb-3">导出分析报告</h4>
                         <div class="d-flex justify-content-center gap-3">
-                            <button class="btn export-btn" id="exportPDF"><i class="fas fa-file-pdf me-2"></i>导出PDF</button>
-                            <button class="btn btn-outline-primary" style="border-radius:30px; padding:12px 30px;" id="exportExcel"><i class="fas fa-file-excel me-2"></i>导出Excel</button>
-                            <button class="btn btn-outline-success" style="border-radius:30px; padding:12px 30px;" id="exportAllChartsPNG"><i class="fas fa-image me-2"></i>导出PNG</button>
+                            <button type="button" class="btn export-btn" id="exportPDF"><i class="fas fa-file-pdf me-2"></i>导出PDF</button>
+                            <button type="button" class="btn btn-outline-primary" style="border-radius:30px; padding:12px 30px;" id="exportExcel"><i class="fas fa-file-excel me-2"></i>导出Excel</button>
+                            <button type="button" class="btn btn-outline-success" style="border-radius:30px; padding:12px 30px;" id="exportAllChartsPNG"><i class="fas fa-image me-2"></i>导出PNG</button>
                         </div>
                     </div>
                 </div>
@@ -232,13 +232,13 @@
             try { return JSON.parse(str); } catch (e) { console.error('JSON解析失败:', str, e); return defaultValue; }
         }
 
-        var trendLabels = safeJSONParse('{{ trend_labels|safe }}', []);
-        var trendData = safeJSONParse('{{ trend_data|safe }}', []);
-        var timeLabels = safeJSONParse('{{ time_labels|safe }}', []);
-        var timeData = safeJSONParse('{{ time_data|safe }}', []);
-        var durationData = safeJSONParse('{{ duration_data|safe }}', []);
-        var completionData = safeJSONParse('{{ completion_data|safe }}', []);
-        var questionStats = safeJSONParse('{{ question_stats|safe }}', []);
+        var trendLabels = {{ trend_labels|safe }};
+        var trendData = {{ trend_data|safe }};
+        var timeLabels = {{ time_labels|safe }};
+        var timeData = {{ time_data|safe }};
+        var durationData = {{ duration_data|safe }};
+        var completionData = {{ completion_data|safe }};
+        var questionStats = {{ question_stats|safe }};
 
         // ========== 总体统计图表 ==========
         var dailyChart = echarts.init(document.getElementById('daily-chart'));
@@ -297,7 +297,7 @@
                 series: [{ type: 'bar', data: histData, name: '人数' }]
             });
         } else {
-            durationStatsDiv.innerHTML = '暂无数据';
+            durationStatsDiv.innerHTML = '';
             durationChart.setOption({
                 title: { text: '回答时长分布', left: 'center' },
                 graphic: { type: 'text', left: 'center', top: 'middle', style: { text: '暂无数据', fill: '#999' } }
@@ -305,12 +305,11 @@
         }
 
         var completionPieChart = echarts.init(document.getElementById('completion-pie-chart'));
-        var totalResponses = {{ summary.total_responses }};
-        var totalViews = {{ questionnaire.view_count }};
-        var completed = totalResponses;
-        var notCompleted = Math.max(0, totalViews - totalResponses);
+        var completed = {{ summary.completion_completed }};
+        var completionTotal = {{ summary.completion_total }};
+        var notCompleted = Math.max(0, completionTotal - completed);
         completionPieChart.setOption({
-            title: { text: '问卷完成率', left: 'center' },
+            title: { text: '{{ summary.completion_label }}', left: 'center' },
             tooltip: { trigger: 'item' },
             series: [{
                 type: 'pie',
@@ -362,36 +361,78 @@
                                 <div class="chart-container" id="question-${q.id}-pie"></div>
                             </div>
                         </div>
+                        <div class="other-answer-table mt-3" id="question-${q.id}-other"></div>
                     `;
 
                     var barChart = echarts.init(document.getElementById(`question-${q.id}-bar`));
                     barChart.setOption({
                         title: { show: false },
-                        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'shadow' },
+                            formatter: function(params) {
+                                var item = params[0];
+                                var pct = q.total_responses ? (item.value / q.total_responses * 100).toFixed(1) : '0.0';
+                                return `${item.name}<br/>回答数量: ${item.value}<br/>占总提交数: ${pct}%`;
+                            }
+                        },
                         grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
                         xAxis: { type: 'value', min: 0 },
                         yAxis: { type: 'category', data: q.options.map((opt, i) => String.fromCharCode(65+i) + '. ' + opt), axisLabel: { fontSize: 11 } },
-                        series: [{ name: '回答数量', type: 'bar', data: q.counts, itemStyle: { color: '#5B8FF9' } }]
+                        series: [{
+                            name: '回答数量',
+                            type: 'bar',
+                            data: q.counts,
+                            itemStyle: { color: '#5B8FF9' },
+                            label: {
+                                show: true,
+                                position: 'right',
+                                formatter: function(params) {
+                                    var pct = q.total_responses ? (params.value / q.total_responses * 100).toFixed(1) : '0.0';
+                                    return `${params.value} (${pct}%)`;
+                                }
+                            }
+                        }]
                     });
 
                     var pieData = q.options.map((opt, i) => ({ name: String.fromCharCode(65+i) + '. ' + opt, value: q.counts[i] })).filter(item => item.value > 0);
                     var pieChart = echarts.init(document.getElementById(`question-${q.id}-pie`));
                     var pieOption = {
                         title: { show: false },
-                        tooltip: { trigger: 'item' },
+                        tooltip: {
+                            trigger: 'item',
+                            formatter: function(params) {
+                                var pct = q.total_responses ? (params.value / q.total_responses * 100).toFixed(1) : '0.0';
+                                return `${params.name}<br/>数量: ${params.value}<br/>占总提交数: ${pct}%`;
+                            }
+                        },
                         series: [{
                             type: 'pie',
                             radius: ['40%', '70%'],
                             data: pieData,
-                            label: { show: true, formatter: '{b}: {c} ({d}%)' }
+                            label: {
+                                show: true,
+                                formatter: function(params) {
+                                    var pct = q.total_responses ? (params.value / q.total_responses * 100).toFixed(1) : '0.0';
+                                    return `${params.name}: ${params.value} (${pct}%)`;
+                                }
+                            }
                         }]
                     };
                     if (pieData.length === 0) {
-                        pieOption.graphic = { type: 'text', left: 'center', top: 'middle', style: { text: '暂无回答', fill: '#999' } };
+                        pieOption.graphic = { type: 'text', left: 'center', top: 'middle', style: { text: '所有选项占比均为 0%', fill: '#999' } };
                     }
                     pieChart.setOption(pieOption);
 
                     allQuestionCharts.push({ id: q.id, charts: [barChart, pieChart] });
+                    if (q.other_answers && q.other_answers.length > 0) {
+                        var otherHtml = '<h6 class="mt-3">其他选项补充内容</h6><div class="answer-table"><table class="table table-sm table-striped"><thead><tr><th>用户</th><th>内容</th></tr></thead><tbody>';
+                        q.other_answers.forEach(item => {
+                            otherHtml += `<tr><td>${item.user}</td><td>${item.answer}</td></tr>`;
+                        });
+                        otherHtml += '</tbody></table></div>';
+                        document.getElementById(`question-${q.id}-other`).innerHTML = otherHtml;
+                    }
 
                 } else if (q.type === 'text') {
                     // 简答题：表格展示用户和答案
@@ -503,100 +544,171 @@
         document.querySelector('.download-completion').addEventListener('click', function() { downloadCard('completion-card', '完成率分析.png'); });
         document.querySelectorAll('.download-question-chart').forEach(btn => btn.addEventListener('click', function() { downloadCard(`question-card-${this.getAttribute('data-question-id')}`, `问题_${this.getAttribute('data-question-id')}.png`); }));
 
-        // ========== 导出PDF：遍历所有卡片，每个卡片一页 PDF ==========
-        document.getElementById('exportPDF').addEventListener('click', function() {
-            // 收集所有卡片（包括 summary-card, time-series-card, completion-card 和所有问题卡片）
-            var cards = [
-                { id: 'summary-card' },
-                { id: 'time-series-card' },
-                { id: 'completion-card' }
-            ];
-            questionStats.forEach(q => {
-                cards.push({ id: `question-card-${q.id}` });
-            });
-
-            const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF('l', 'mm', 'a4'); // 横向 A4
-            var promise = Promise.resolve();
-            var pageIndex = 0;
-
-            cards.forEach(card => {
-                promise = promise.then(() => {
-                    return html2canvas(document.getElementById(card.id), { scale: 2, backgroundColor: '#fff' }).then(canvas => {
-                        if (pageIndex > 0) pdf.addPage();
-                        pageIndex++;
-                        var imgData = canvas.toDataURL('image/png');
-                        var imgWidth = pdf.internal.pageSize.getWidth();
-                        var imgHeight = (canvas.height * imgWidth) / canvas.width;
-                        pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-                    });
-                });
-            });
-
-            promise.then(() => pdf.save('所有图表.pdf')).catch(err => alert('导出PDF失败，请重试'));
-        });
-
-        // ========== 导出所有图表为PNG：将所有卡片垂直拼接成一张长图 ==========
-        document.getElementById('exportAllChartsPNG').addEventListener('click', function() {
-            var cards = [
-                document.getElementById('summary-card'),
-                document.getElementById('time-series-card'),
-                document.getElementById('completion-card')
-            ];
-            questionStats.forEach(q => {
-                cards.push(document.getElementById(`question-card-${q.id}`));
-            });
-
-            // 过滤掉可能不存在的卡片
-            cards = cards.filter(card => card !== null);
-
-            // 逐个截图，然后拼接
-            Promise.all(cards.map(card => html2canvas(card, { scale: 2, backgroundColor: '#fff' })))
-                .then(canvases => {
-                    // 计算总高度和最大宽度
-                    var totalHeight = canvases.reduce((sum, canvas) => sum + canvas.height, 0);
-                    var maxWidth = Math.max(...canvases.map(c => c.width));
-
-                    // 创建最终画布
-                    var finalCanvas = document.createElement('canvas');
-                    finalCanvas.width = maxWidth;
-                    finalCanvas.height = totalHeight;
-                    var ctx = finalCanvas.getContext('2d');
-
-                    // 依次绘制每个卡片截图
-                    var y = 0;
-                    canvases.forEach(canvas => {
-                        ctx.drawImage(canvas, 0, y, canvas.width, canvas.height);
-                        y += canvas.height;
-                    });
-
-                    // 导出为 PNG
-                    var link = document.createElement('a');
-                    link.download = '所有图表.png';
-                    link.href = finalCanvas.toDataURL('image/png');
-                    link.click();
-                })
-                .catch(err => {
-                    console.error('导出失败:', err);
-                    alert('导出失败，请重试');
-                });
-        });
-
-        // ========== Excel 导出 ==========
-        document.getElementById('exportExcel').addEventListener('click', function() {
-            const table = document.getElementById('data-table');
-            if (!table) return;
-            const ws = XLSX.utils.table_to_sheet(table, { raw: true });
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, '原始数据');
-            XLSX.writeFile(wb, '{{ questionnaire.title }}_原始数据.xlsx');
-        });
-
         window.addEventListener('resize', function() {
             dailyChart.resize(); hourlyChart.resize(); durationChart.resize(); completionPieChart.resize();
             timeSeries1.resize(); timeSeries2.resize(); completionBar.resize();
             allQuestionCharts.forEach(info => info.charts.forEach(chart => chart.resize()));
         });
+    </script>
+    <script>
+        (function() {
+            function sanitizeFilename(name) {
+                return String(name || '分析报告').replace(/[\\/:*?"<>|]/g, '_').trim() || '分析报告';
+            }
+
+            function setButtonBusy(button, busyText) {
+                if (!button) return function() {};
+                var oldText = button.innerHTML;
+                button.disabled = true;
+                button.innerHTML = busyText;
+                return function() {
+                    button.disabled = false;
+                    button.innerHTML = oldText;
+                };
+            }
+
+            function requireScreenshotLib() {
+                if (typeof window.html2canvas !== 'function') {
+                    alert('导出截图库 html2canvas 未加载成功，请检查网络或刷新页面后重试。');
+                    return false;
+                }
+                return true;
+            }
+
+            async function captureReportCanvas() {
+                var report = document.getElementById('report-container');
+                if (!report) throw new Error('没有可导出的内容');
+                return window.html2canvas(report, {
+                    scale: 1.2,
+                    backgroundColor: '#fff',
+                    useCORS: true,
+                    logging: false,
+                    ignoreElements: function(element) {
+                        return element && element.classList && element.classList.contains('action-buttons');
+                    }
+                });
+            }
+
+            function downloadCanvas(canvas, filename) {
+                var link = document.createElement('a');
+                link.download = filename;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }
+
+            async function exportPng(button) {
+                if (!requireScreenshotLib()) return;
+                var restore = setButtonBusy(button, '正在导出PNG...');
+                try {
+                    var canvas = await captureReportCanvas();
+                    downloadCanvas(canvas, sanitizeFilename('{{ questionnaire.title|escapejs }}') + '_分析报告.png');
+                } catch (err) {
+                    console.error('PNG导出失败:', err);
+                    alert('PNG导出失败：' + (err.message || '请重试'));
+                } finally {
+                    restore();
+                }
+            }
+
+            async function exportPdf(button) {
+                if (!requireScreenshotLib()) return;
+                if (!window.jspdf || !window.jspdf.jsPDF) {
+                    alert('PDF 导出库 jsPDF 未加载成功，请检查网络或刷新页面后重试。');
+                    return;
+                }
+                var restore = setButtonBusy(button, '正在导出PDF...');
+                try {
+                    var canvas = await captureReportCanvas();
+                    var pdf = new window.jspdf.jsPDF('p', 'mm', 'a4');
+                    var pageWidth = pdf.internal.pageSize.getWidth();
+                    var pageHeight = pdf.internal.pageSize.getHeight();
+                    var pageCanvas = document.createElement('canvas');
+                    var pageCtx = pageCanvas.getContext('2d');
+                    var sourcePageHeight = Math.floor(canvas.width * pageHeight / pageWidth);
+                    var renderedHeight = 0;
+                    var pageIndex = 0;
+                    while (renderedHeight < canvas.height) {
+                        var sliceHeight = Math.min(sourcePageHeight, canvas.height - renderedHeight);
+                        pageCanvas.width = canvas.width;
+                        pageCanvas.height = sliceHeight;
+                        pageCtx.clearRect(0, 0, pageCanvas.width, pageCanvas.height);
+                        pageCtx.drawImage(
+                            canvas,
+                            0,
+                            renderedHeight,
+                            canvas.width,
+                            sliceHeight,
+                            0,
+                            0,
+                            canvas.width,
+                            sliceHeight
+                        );
+                        if (pageIndex > 0) pdf.addPage();
+                        var imgHeight = sliceHeight * pageWidth / canvas.width;
+                        pdf.addImage(pageCanvas.toDataURL('image/jpeg', 0.86), 'JPEG', 0, 0, pageWidth, imgHeight);
+                        renderedHeight += sliceHeight;
+                        pageIndex += 1;
+                    }
+                    pdf.save(sanitizeFilename('{{ questionnaire.title|escapejs }}') + '_分析报告.pdf');
+                } catch (err) {
+                    console.error('PDF导出失败:', err);
+                    alert('PDF导出失败：' + (err.message || '请重试'));
+                } finally {
+                    restore();
+                }
+            }
+
+            function exportCsvFallback(table, filename) {
+                var rows = Array.from(table.querySelectorAll('tr')).map(function(row) {
+                    return Array.from(row.children).map(function(cell) {
+                        return '"' + String(cell.innerText || '').replace(/"/g, '""') + '"';
+                    }).join(',');
+                }).join('\r\n');
+                var blob = new Blob(['\ufeff' + rows], { type: 'text/csv;charset=utf-8;' });
+                var link = document.createElement('a');
+                link.download = filename.replace(/\.xlsx$/i, '.csv');
+                link.href = URL.createObjectURL(blob);
+                link.click();
+                URL.revokeObjectURL(link.href);
+            }
+
+            function exportExcel(button) {
+                var restore = setButtonBusy(button, '正在导出Excel...');
+                try {
+                    var table = document.getElementById('data-table');
+                    if (!table) throw new Error('没有原始数据表格');
+                    var filename = sanitizeFilename('{{ questionnaire.title|escapejs }}') + '_原始数据.xlsx';
+                    if (window.XLSX && window.XLSX.utils) {
+                        var ws = window.XLSX.utils.table_to_sheet(table, { raw: true });
+                        var wb = window.XLSX.utils.book_new();
+                        window.XLSX.utils.book_append_sheet(wb, ws, '原始数据');
+                        window.XLSX.writeFile(wb, filename);
+                    } else {
+                        exportCsvFallback(table, filename);
+                    }
+                } catch (err) {
+                    console.error('Excel导出失败:', err);
+                    alert('Excel导出失败：' + (err.message || '请重试'));
+                } finally {
+                    restore();
+                }
+            }
+
+            function bindExportButtons() {
+                var pdfButton = document.getElementById('exportPDF');
+                var excelButton = document.getElementById('exportExcel');
+                var pngButton = document.getElementById('exportAllChartsPNG');
+                if (pdfButton) pdfButton.onclick = function() { exportPdf(pdfButton); };
+                if (excelButton) excelButton.onclick = function() { exportExcel(excelButton); };
+                if (pngButton) pngButton.onclick = function() { exportPng(pngButton); };
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', bindExportButtons);
+            } else {
+                bindExportButtons();
+            }
+        })();
     </script>
 </body>
 </html>

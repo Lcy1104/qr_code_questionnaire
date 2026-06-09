@@ -31,10 +31,10 @@
     <span class="badge bg-success">已完成</span>
 {% elif target.status == 'draft' %}
     <span class="badge bg-warning text-dark">暂存</span>
-    <a href="{% url 'survey_fill' questionnaire.id %}?target={{ target.name|urlencode }}{% if not is_authenticated %}&anonymous=1{% endif %}" class="btn btn-sm btn-info ms-2">继续填写</a>
+    <a href="{% url 'survey_fill' questionnaire.id %}?target={{ target.name|urlencode }}{% if is_anonymous_mode %}&anonymous=1{% endif %}" class="btn btn-sm btn-info ms-2">继续填写</a>
 {% else %}
     <span class="badge bg-secondary">未开始</span>
-    <a href="{% url 'survey_fill' questionnaire.id %}?target={{ target.name|urlencode }}{% if not is_authenticated %}&anonymous=1{% endif %}" class="btn btn-sm btn-primary ms-2">开始评价</a>
+    <a href="{% url 'survey_fill' questionnaire.id %}?target={{ target.name|urlencode }}{% if is_anonymous_mode %}&anonymous=1{% endif %}" class="btn btn-sm btn-primary ms-2">开始评价</a>
 {% endif %}
                             </span>
                         </li>

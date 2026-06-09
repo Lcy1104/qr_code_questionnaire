@@ -103,7 +103,7 @@
                                 </p>
                             </div>
                         </div>
-                        {% if response.completion_time %}
+                        {% if response.completion_time is not None %}
                         <div class="row">
                             <div class="col-12">
                                 <p class="mb-1"><strong>填写用时：</strong></p>

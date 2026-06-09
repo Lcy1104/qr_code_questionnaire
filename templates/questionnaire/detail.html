@@ -460,7 +460,7 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
                                     {% if response %}
                                         <a href="{% url 'response_detail' response.id %}"
                                            class="btn btn-sm btn-outline-info">
-                                            <i class="fas fa-eye me-1"></i>查看填写情况
+                                            <i class="fas fa-eye me-1"></i>查看作答结果
                                         </a>
                                     {% endif %}
                                 {% endwith %}
@@ -542,23 +542,46 @@ span.badge.bg-info { background-color: #0dcaf0 !important; color: #000; }
                         <hr>
 
                         <h6>最近回答</h6>
-                        {% if responses %}
-                        <div class="list-group list-group-flush">
-                            {% for response in responses|slice:":5" %}
-                            <div class="list-group-item px-0">
-                                <small>
-                                    {{ response.user.username }} -
-                                    {{ response.submitted_at|date:"m-d H:i" }}
-                                    {% if response.needs_update %}
-                                    <span class="badge bg-warning update-badge ms-1">需更新</span>
-                                    {% endif %}
-                                </small>
-                            </div>
-                            {% endfor %}
-                        </div>
-                        {% else %}
-                        <p class="text-muted small">暂无回答</p>
-                        {% endif %}
+{% if questionnaire.is_multi_target %}
+    {# 多目标问卷：只显示最新的一条提交记录 #}
+    {% with latest_response=responses|first %}
+        {% if latest_response %}
+        <div class="list-group list-group-flush">
+            <div class="list-group-item px-0">
+                <small>
+                    {{ latest_response.user.username }} -
+                    {{ latest_response.submitted_at|date:"m-d H:i" }}
+                    {% if latest_response.needs_update %}
+                    <span class="badge bg-warning update-badge ms-1">需更新</span>
+                    {% endif %}
+                    <span class="text-muted ms-2">（多目标问卷，仅显示最近一次提交）</span>
+                </small>
+            </div>
+        </div>
+        {% else %}
+        <p class="text-muted small">暂无回答</p>
+        {% endif %}
+    {% endwith %}
+{% else %}
+    {# 非多目标问卷：保持原有显示多条（最多5条） #}
+    {% if responses %}
+    <div class="list-group list-group-flush">
+        {% for response in responses|slice:":5" %}
+        <div class="list-group-item px-0">
+            <small>
+                {{ response.user.username }} -
+                {{ response.submitted_at|date:"m-d H:i" }}
+                {% if response.needs_update %}
+                <span class="badge bg-warning update-badge ms-1">需更新</span>
+                {% endif %}
+            </small>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-muted small">暂无回答</p>
+    {% endif %}
+{% endif %}
                     </div>
                 </div>
             </div>
@@ -986,16 +1009,21 @@ tooltipTriggerList.map(function (tooltipTriggerEl) {
     if (storedData) {
         try {
             const data = JSON.parse(storedData);
-            if (data.questionnaire_id === '{{ questionnaire.id }}') {
+            const storedVersion = parseInt(data.version || data.questionnaire_version || 0);
+            const currentVersion = parseInt('{{ questionnaire.version }}');
+            if (data.questionnaire_id === '{{ questionnaire.id }}' && storedVersion === currentVersion) {
                 console.log('使用存储的数据渲染页面');
                 if (data.questions) updateQuestionsUI(data.questions);
                 if (data.has_available_qrcode !== undefined) {
                     updateButtonUI(data.has_available_qrcode, data.user_has_submitted || false);
                 }
-                if (data.submit_count !== undefined) updateStatsUI(data.submit_count);
                 sessionStorage.removeItem('questionnaire_data');
                 window.__data_loaded_from_storage = true;
                 return; // 数据已加载，不再执行后续 fetch
+            }
+            if (data.questionnaire_id === '{{ questionnaire.id }}') {
+                sessionStorage.removeItem('questionnaire_data');
+                console.log('忽略旧版本缓存数据:', storedVersion, '当前版本:', currentVersion);
             }
         } catch (e) {
             console.error('解析存储数据失败', e);
@@ -1038,9 +1066,6 @@ tooltipTriggerList.map(function (tooltipTriggerEl) {
             var userSubmitted = data.user_has_submitted === true || data.user_has_submitted === 'true';
             updateButtonUI(data.has_available_qrcode, userSubmitted);
         }
-        if (data.submit_count !== undefined) {
-            //updateStatsUI(data.submit_count);
-        }
     }
 };
 
@@ -1064,7 +1089,7 @@ tooltipTriggerList.map(function (tooltipTriggerEl) {
         // 更新按钮组
         const btnGroup = qrDiv.querySelector('.qr-buttons');
         if (btnGroup && isUsed) {
-            btnGroup.innerHTML = `<a href="/response/${responseId}/" class="btn btn-sm btn-outline-info">查看填写情况</a>`;
+            btnGroup.innerHTML = `<a href="/response/${responseId}/" class="btn btn-sm btn-outline-info">查看作答结果</a>`;
         }
     }
 })();
@@ -1274,8 +1299,11 @@ function fetchLatestData() {
                 updateQuestionsUI(data.questions);
                 // 更新按钮状态
                 updateButtonUI(data.has_available_qrcode, data.user_has_submitted);
-                // 更新提交计数等统计信息
-                updateStatsUI(data.submit_count);
+                const apiVersion = parseInt(data.version || data.questionnaire_version || 0);
+                const currentVersion = parseInt('{{ questionnaire.version }}');
+                if (apiVersion !== currentVersion) {
+                    console.log('忽略非当前版本 API 数据:', apiVersion, '当前版本:', currentVersion);
+                }
             }
         })
         .catch(err => console.error('获取最新数据失败:', err));
@@ -1460,7 +1488,6 @@ function updateButtonUI(hasQrcode, userSubmittedFromMsg) {
         if (userVersion === 0) {
             if (currentVersion > 1) {
                 userSubmitted = false;  // 问卷已更新，允许重新填写
-                updateStatsUI(0);
                 console.log('版本回退: userVersion=0 且问卷更新，强制设为 false');
             } else {
                 userSubmitted = templateUserHasSubmitted;  // 问卷未更新，使用模板值
@@ -1468,7 +1495,6 @@ function updateButtonUI(hasQrcode, userSubmittedFromMsg) {
             }
         } else if (currentVersion > userVersion) {
             userSubmitted = false;  // 问卷更新，允许填写
-            //updateStatsUI(0);
             console.log('版本覆盖: 问卷更新，强制设为 false');
         } else if (currentVersion === userVersion && userVersion > 0) {
             userSubmitted = true;   // 版本相同且有提交记录，禁用
@@ -1556,19 +1582,9 @@ if (isMultiTarget) {
     console.log('最终按钮元素:', document.getElementById('fill-questionnaire-btn').outerHTML);
 }
 
-// 更新统计信息（提交次数等）- 改进版：避免被0覆盖
+// 统计信息使用服务端数据库渲染值，避免旧缓存或异步数据覆盖当前版本统计。
 function updateStatsUI(submitCount) {
-    const submitCountSpan = document.getElementById('submit-count');
-    if (!submitCountSpan) return;
-
-    // 确保 submitCount 是有效的数字，否则不更新
-    if (typeof submitCount === 'number' && !isNaN(submitCount)) {
-        submitCountSpan.textContent = submitCount;
-        console.log('提交次数更新为', submitCount);
-    } else {
-        console.warn('updateStatsUI: 忽略无效的提交次数', submitCount);
-        // 可以选择保留原值，不做任何操作
-    }
+    console.log('忽略前端统计覆盖，保留服务端数据库统计:', submitCount);
 }
 // 在页面加载后调用
 document.addEventListener('DOMContentLoaded', function() {
