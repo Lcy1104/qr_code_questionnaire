@@ -15,7 +15,6 @@ import json
 from questionnaire.utils.encryption import SM4EncryptedField
 from questionnaire.utils.validators import validate_phone, validate_id_card
 
-
 class CustomUserManager(BaseUserManager):
     """自定义用户管理器"""
 
